@@ -111,7 +111,7 @@ function DocumentCard(props: Props) {
 
             {document.emoji ? (
               <Squircle color={theme.slateLight}>
-                <EmojiIcon emoji={document.emoji} size={26} />
+                <EmojiIcon emoji={document.emoji} size={24} />
               </Squircle>
             ) : (
               <Squircle color={collection?.color}>
@@ -279,8 +279,8 @@ const Heading = styled.h3`
   overflow: hidden;
 
   color: ${s("text")};
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen,
-    Ubuntu, Cantarell, "Open Sans", "Helvetica Neue", sans-serif;
+  font-family: ${s("fontFamily")};
+  font-weight: 500;
 `;
 
 export default observer(DocumentCard);

@@ -1,4 +1,8 @@
-export type Role = "admin" | "viewer" | "member";
+export enum UserRole {
+  Admin = "admin",
+  Member = "member",
+  Viewer = "viewer",
+}
 
 export type DateFilter = "day" | "week" | "month" | "year";
 
@@ -155,6 +159,7 @@ export type NavigationNode = {
   id: string;
   title: string;
   url: string;
+  emoji?: string;
   children: NavigationNode[];
   isDraft?: boolean;
   collectionId?: string;
