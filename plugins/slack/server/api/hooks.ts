@@ -70,20 +70,31 @@ router.post(
           model: UserAuthentication,
           as: "authentications",
           required: true,
-          separate: true,
         },
       ],
     });
     if (!user) {
+      Logger.debug("plugins", "No user found for Slack user ID", {
+        providerId: event.user,
+      });
       return;
     }
+
     const auth = await IntegrationAuthentication.findOne({
       where: {
         service: IntegrationService.Slack,
         teamId: user.teamId,
       },
     });
+
     if (!auth) {
+      Logger.debug(
+        "plugins",
+        "No Slack integration authentication found for team",
+        {
+          teamId: user.teamId,
+        }
+      );
       return;
     }
     // get content for unfurled links
@@ -335,14 +346,12 @@ router.post(
       ? await SearchHelper.searchForUser(user, text, options)
       : await SearchHelper.searchForTeam(team, text, options);
 
-    void SearchQuery.create({
+    await SearchQuery.create({
       userId: user ? user.id : null,
       teamId: team.id,
       source: "slack",
       query: text,
       results: totalCount,
-    }).catch((err) => {
-      Logger.error("Failed to create search query", err);
     });
 
     const haventSignedIn = t(

@@ -3,6 +3,7 @@ import { Slice } from "prosemirror-model";
 import { Selection } from "prosemirror-state";
 import { __parseFromClipboard } from "prosemirror-view";
 import * as React from "react";
+import { mergeRefs } from "react-merge-refs";
 import styled from "styled-components";
 import breakpoint from "styled-components-breakpoint";
 import isMarkdown from "@shared/editor/lib/isMarkdown";
@@ -28,7 +29,7 @@ const EmojiPicker = React.lazy(() => import("~/components/EmojiPicker"));
 type Props = {
   /** ID of the associated document */
   documentId: string;
-  /** Document to display */
+  /** Title to display */
   title: string;
   /** Emoji to display */
   emoji?: string | null;
@@ -64,8 +65,9 @@ const DocumentTitle = React.forwardRef(function _DocumentTitle(
     onBlur,
     placeholder,
   }: Props,
-  ref: React.RefObject<RefHandle>
+  externalRef: React.RefObject<RefHandle>
 ) {
+  const ref = React.useRef<RefHandle>(null);
   const [emojiPickerIsOpen, handleOpen, handleClose] = useBoolean();
   const { editor } = useDocumentContext();
 
@@ -147,13 +149,13 @@ const DocumentTitle = React.forwardRef(function _DocumentTitle(
 
       if (/\/date\s$/.test(value)) {
         title = getCurrentDateAsString();
-        ref.current?.focusAtEnd();
+        ref?.current?.focusAtEnd();
       } else if (/\/time$/.test(value)) {
         title = getCurrentTimeAsString();
-        ref.current?.focusAtEnd();
+        ref?.current?.focusAtEnd();
       } else if (/\/datetime$/.test(value)) {
         title = getCurrentDateTimeAsString();
-        ref.current?.focusAtEnd();
+        ref?.current?.focusAtEnd();
       }
 
       onChangeTitle?.(title);
@@ -231,6 +233,7 @@ const DocumentTitle = React.forwardRef(function _DocumentTitle(
     [emoji, onChangeEmoji, restoreFocus]
   );
 
+  const dir = ref.current?.getComputedDirection();
   const emojiIcon = <Emoji size={32}>{emoji}</Emoji>;
 
   return (
@@ -244,14 +247,14 @@ const DocumentTitle = React.forwardRef(function _DocumentTitle(
       value={title}
       $emojiPickerIsOpen={emojiPickerIsOpen}
       $containsEmoji={!!emoji}
-      autoFocus={!document.title}
+      autoFocus={!title}
       maxLength={DocumentValidation.maxTitleLength}
       readOnly={readOnly}
       dir="auto"
-      ref={ref}
+      ref={mergeRefs([ref, externalRef])}
     >
       {can.update && !readOnly ? (
-        <EmojiWrapper align="center" justify="center">
+        <EmojiWrapper align="center" justify="center" dir={dir}>
           <React.Suspense fallback={emojiIcon}>
             <StyledEmojiPicker
               value={emoji}
@@ -264,7 +267,7 @@ const DocumentTitle = React.forwardRef(function _DocumentTitle(
           </React.Suspense>
         </EmojiWrapper>
       ) : emoji ? (
-        <EmojiWrapper align="center" justify="center">
+        <EmojiWrapper align="center" justify="center" dir={dir}>
           {emojiIcon}
         </EmojiWrapper>
       ) : null}
@@ -276,10 +279,10 @@ const StyledEmojiPicker = styled(EmojiPicker)`
   ${extraArea(8)}
 `;
 
-const EmojiWrapper = styled(Flex)`
+const EmojiWrapper = styled(Flex)<{ dir?: string }>`
   position: absolute;
   top: 8px;
-  left: -40px;
+  ${(props) => (props.dir === "rtl" ? "right: -40px" : "left: -40px")};
   height: 32px;
   width: 32px;
 `;

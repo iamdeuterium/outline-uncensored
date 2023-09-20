@@ -1,11 +1,14 @@
+import path from "path";
 import fs from "fs-extra";
 import invariant from "invariant";
+import JSZip from "jszip";
 import Router from "koa-router";
+import escapeRegExp from "lodash/escapeRegExp";
 import mime from "mime-types";
 import { Op, ScopeOptions, WhereOptions } from "sequelize";
 import { TeamPreference } from "@shared/types";
 import { subtractDate } from "@shared/utils/date";
-import { bytesToHumanReadable } from "@shared/utils/files";
+import slugify from "@shared/utils/slugify";
 import documentCreator from "@server/commands/documentCreator";
 import documentImporter from "@server/commands/documentImporter";
 import documentLoader from "@server/commands/documentLoader";
@@ -22,10 +25,12 @@ import {
 } from "@server/errors";
 import Logger from "@server/logging/Logger";
 import auth from "@server/middlewares/authentication";
+import multipart from "@server/middlewares/multipart";
 import { rateLimiter } from "@server/middlewares/rateLimiter";
 import { transaction } from "@server/middlewares/transaction";
 import validate from "@server/middlewares/validate";
 import {
+  Attachment,
   Backlink,
   Collection,
   Document,
@@ -47,9 +52,9 @@ import {
 } from "@server/presenters";
 import { APIContext } from "@server/types";
 import { RateLimiterStrategy } from "@server/utils/RateLimiter";
-import { getFileFromRequest } from "@server/utils/koa";
+import ZipHelper from "@server/utils/ZipHelper";
+import parseAttachmentIds from "@server/utils/parseAttachmentIds";
 import { getTeamFromContext } from "@server/utils/passport";
-import slugify from "@server/utils/slugify";
 import { assertPresent } from "@server/validation";
 import pagination from "../middlewares/pagination";
 import * as T from "./schema";
@@ -517,8 +522,8 @@ router.post(
       includeState: !accept?.includes("text/markdown"),
     });
 
-    let contentType;
-    let content;
+    let contentType: string;
+    let content: string;
 
     if (accept?.includes("text/html")) {
       contentType = "text/html";
@@ -538,26 +543,70 @@ router.post(
       content = DocumentHelper.toMarkdown(document);
     }
 
-    if (contentType !== "application/json") {
-      // Override the extension for Markdown as it's incorrect in the mime-types
-      // library until a new release > 2.1.35
-      const extension =
-        contentType === "text/markdown" ? "md" : mime.extension(contentType);
+    if (contentType === "application/json") {
+      ctx.body = {
+        data: content,
+      };
+      return;
+    }
 
+    // Override the extension for Markdown as it's incorrect in the mime-types
+    // library until a new release > 2.1.35
+    const extension =
+      contentType === "text/markdown" ? "md" : mime.extension(contentType);
+
+    const fileName = slugify(document.titleWithDefault);
+    const attachmentIds = parseAttachmentIds(document.text);
+    const attachments = attachmentIds.length
+      ? await Attachment.findAll({
+          where: {
+            teamId: document.teamId,
+            id: attachmentIds,
+          },
+        })
+      : [];
+
+    if (attachments.length === 0) {
       ctx.set("Content-Type", contentType);
-      ctx.set(
-        "Content-Disposition",
-        `attachment; filename="${slugify(
-          document.titleWithDefault
-        )}.${extension}"`
-      );
+      ctx.attachment(`${fileName}.${extension}`);
       ctx.body = content;
       return;
     }
 
-    ctx.body = {
-      data: content,
-    };
+    const zip = new JSZip();
+
+    await Promise.all(
+      attachments.map(async (attachment) => {
+        try {
+          const location = path.join(
+            "attachments",
+            `${attachment.id}.${mime.extension(attachment.contentType)}`
+          );
+          zip.file(location, attachment.buffer, {
+            date: attachment.updatedAt,
+            createFolders: true,
+          });
+
+          content = content.replace(
+            new RegExp(escapeRegExp(attachment.redirectUrl), "g"),
+            location
+          );
+        } catch (err) {
+          Logger.error(
+            `Failed to add attachment to archive: ${attachment.id}`,
+            err
+          );
+        }
+      })
+    );
+
+    zip.file(`${fileName}.${extension}`, content, {
+      date: document.updatedAt,
+    });
+
+    ctx.set("Content-Type", "application/zip");
+    ctx.attachment(`${fileName}.zip`);
+    ctx.body = zip.generateNodeStream(ZipHelper.defaultStreamOptions);
   }
 );
 
@@ -818,15 +867,13 @@ router.post(
     // When requesting subsequent pages of search results we don't want to record
     // duplicate search query records
     if (offset === 0) {
-      void SearchQuery.create({
+      await SearchQuery.create({
         userId: user?.id,
         teamId,
         shareId,
         source: ctx.state.auth.type || "app", // we'll consider anything that isn't "api" to be "app"
         query,
         results: totalCount,
-      }).catch((err) => {
-        Logger.error("Failed to create search query", err);
       });
     }
 
@@ -1169,26 +1216,11 @@ router.post(
   auth(),
   rateLimiter(RateLimiterStrategy.TwentyFivePerMinute),
   validate(T.DocumentsImportSchema),
+  multipart({ maximumFileSize: env.MAXIMUM_IMPORT_SIZE }),
   transaction(),
   async (ctx: APIContext<T.DocumentsImportReq>) => {
-    if (!ctx.is("multipart/form-data")) {
-      throw InvalidRequestError("Request type must be multipart/form-data");
-    }
-
     const { collectionId, parentDocumentId, publish } = ctx.input.body;
-
-    const file = getFileFromRequest(ctx.request);
-    if (!file) {
-      throw InvalidRequestError("Request must include a file parameter");
-    }
-
-    if (env.MAXIMUM_IMPORT_SIZE && file.size > env.MAXIMUM_IMPORT_SIZE) {
-      throw InvalidRequestError(
-        `The selected file was larger than the ${bytesToHumanReadable(
-          env.MAXIMUM_IMPORT_SIZE
-        )} maximum size`
-      );
-    }
+    const file = ctx.input.file;
 
     const { transaction } = ctx.state;
     const { user } = ctx.state.auth;
@@ -1217,7 +1249,7 @@ router.post(
     }
 
     const content = await fs.readFile(file.filepath);
-    const { text, state, title } = await documentImporter({
+    const { text, state, title, emoji } = await documentImporter({
       user,
       fileName: file.originalFilename ?? file.newFilename,
       mimeType: file.mimetype ?? "",
@@ -1229,6 +1261,7 @@ router.post(
     const document = await documentCreator({
       source: "import",
       title,
+      emoji,
       text,
       state,
       publish,
