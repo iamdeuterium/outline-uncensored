@@ -1,11 +1,13 @@
 /* eslint-disable no-irregular-whitespace */
 import { lighten, transparentize } from "polished";
 import styled, { DefaultTheme, css, keyframes } from "styled-components";
+import { videoStyle } from "./Video";
 
 export type Props = {
   rtl: boolean;
   readOnly?: boolean;
   readOnlyWriteCheckboxes?: boolean;
+  staticHTML?: boolean;
   editorStyle?: React.CSSProperties;
   grow?: boolean;
   theme: DefaultTheme;
@@ -249,6 +251,17 @@ const findAndReplaceStyle = () => css`
   }
 `;
 
+const emailStyle = (props: Props) => css`
+  .attachment {
+    display: block;
+    color: ${props.theme.text} !important;
+    box-shadow: 0 0 0 1px ${props.theme.divider};
+    white-space: nowrap;
+    border-radius: 8px;
+    padding: 6px 8px;
+  }
+`;
+
 const style = (props: Props) => `
 flex-grow: ${props.grow ? 1 : 0};
 justify-content: start;
@@ -390,7 +403,15 @@ li {
   position: relative;
 }
 
-.image {
+iframe.embed {
+  width: 100%;
+  height: 400px;
+  border: 1px solid ${props.theme.embedBorder};
+  border-radius: 6px;
+}
+
+.image,
+.video {
   line-height: 0;
   text-align: center;
   max-width: 100%;
@@ -398,10 +419,16 @@ li {
   position: relative;
   z-index: 1;
 
-  img {
+  img,
+  video {
     pointer-events: ${props.readOnly ? "initial" : "none"};
     display: inline-block;
     max-width: 100%;
+  }
+
+  video {
+    pointer-events: initial;
+    ${videoStyle}
   }
 
   .ProseMirror-selectednode img {
@@ -409,13 +436,55 @@ li {
   }
 }
 
-.image.placeholder {
+.image.placeholder,
+.video.placeholder {
   position: relative;
   background: ${props.theme.background};
   margin-bottom: calc(28px + 1.2em);
 
-  img {
+  img,
+  video {
     opacity: 0.5;
+  }
+
+  video {
+    border-radius: 8px;
+  }
+}
+
+.file.placeholder {
+  display: flex;
+  align-items: center;
+  background: ${props.theme.background};
+  box-shadow: 0 0 0 1px ${props.theme.divider};
+  white-space: nowrap;
+  border-radius: 8px;
+  padding: 6px 8px;
+  max-width: 840px;
+  cursor: default;
+
+  margin-top: 0.5em;
+  margin-bottom: 0.5em;
+
+  .title,
+  .subtitle {
+    margin-left: 8px;
+  }
+
+  .title {
+    font-weight: 600;
+    font-size: 14px;
+    color:  ${props.theme.text};
+  }
+
+  .subtitle {
+    font-size: 13px;
+    color: ${props.theme.textTertiary};
+    line-height: 0;
+  }
+
+  span {
+    font-family: ${props.theme.fontFamilyMono};
   }
 }
 
@@ -647,6 +716,7 @@ h6:not(.placeholder):before {
 
 .heading-actions {
   opacity: 0;
+  user-select: none;
   background: ${props.theme.background};
   margin-${props.rtl ? "right" : "left"}: -26px;
   flex-direction: ${props.rtl ? "row-reverse" : "row"};
@@ -718,13 +788,13 @@ h6 {
 }
 
 .comment-marker {
-  border-bottom: 2px solid ${transparentize(0.5, props.theme.brand.marine)};
+  border-bottom: 2px solid ${props.theme.commentMarkBackground};
   transition: background 100ms ease-in-out;
   border-radius: 2px;
 
   &:hover {
     ${props.readOnly ? "cursor: var(--pointer);" : ""}
-    background: ${transparentize(0.5, props.theme.brand.marine)};
+    background: ${props.theme.commentMarkBackground};
   }
 }
 
@@ -1064,24 +1134,29 @@ mark {
 }
 
 .code-block[data-language=mermaidjs] {
+  margin: 0.75em 0;
+
   pre {
     border-bottom-left-radius: 0;
     border-bottom-right-radius: 0;
-    margin-bottom: -12px;
+    margin-bottom: -20px;
     overflow: hidden;
   }
 
-  /* Hide code without display none so toolbar can still be positioned against it */
+  // Hide code without display none so toolbar can still be positioned against it
   &:not(.code-active) {
-    height: 0;
-    margin: -0.5em 0;
+    height: ${props.staticHTML ? "auto" : "0"};
+    margin: -0.75em 0;
     overflow: hidden;
+
+    // Allows the margin to collapse correctly by moving div out of the flow
+    position: absolute;
   }
 }
 
 /* Hide code without display none so toolbar can still be positioned against it */
 .ProseMirror[contenteditable="false"] .code-block[data-language=mermaidjs] {
-  height: 0;
+  height: ${props.staticHTML ? "auto" : "0"};
   margin: -0.5em 0;
   overflow: hidden;
 }
@@ -1094,7 +1169,7 @@ mark {
   &:after {
     content: attr(data-line-numbers);
     position: absolute;
-    padding-left: 1em;
+    padding-left: 0.5em;
     left: 1px;
     top: calc(1px + 0.75em);
     width: calc(var(--line-number-gutter-width,0) * 1em + .25em);
@@ -1115,6 +1190,7 @@ mark {
   display: flex;
   align-items: center;
   justify-content: center;
+  margin: 0.75em 0;
   min-height: 1.6em;
   background: ${props.theme.codeBackground};
   border-radius: 6px;
@@ -1422,8 +1498,10 @@ table {
   animation: ProseMirror-cursor-blink 1.1s steps(2, start) infinite;
 }
 
-.folded-content {
+.folded-content,
+.folded-content + .mermaid-diagram-wrapper {
   display: none;
+  user-select: none;
 }
 
 @keyframes ProseMirror-cursor-blink {
@@ -1502,6 +1580,7 @@ const EditorContainer = styled.div<Props>`
   ${codeMarkCursor}
   ${codeBlockStyle}
   ${findAndReplaceStyle}
+  ${emailStyle}
 `;
 
 export default EditorContainer;

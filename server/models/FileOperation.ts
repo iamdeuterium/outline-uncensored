@@ -1,4 +1,9 @@
-import { Op, WhereOptions } from "sequelize";
+import {
+  InferAttributes,
+  InferCreationAttributes,
+  Op,
+  WhereOptions,
+} from "sequelize";
 import {
   ForeignKey,
   DefaultScope,
@@ -17,7 +22,7 @@ import FileStorage from "@server/storage/files";
 import Collection from "./Collection";
 import Team from "./Team";
 import User from "./User";
-import IdModel from "./base/IdModel";
+import ParanoidModel from "./base/ParanoidModel";
 import Fix from "./decorators/Fix";
 
 @DefaultScope(() => ({
@@ -36,7 +41,10 @@ import Fix from "./decorators/Fix";
 }))
 @Table({ tableName: "file_operations", modelName: "file_operation" })
 @Fix
-class FileOperation extends IdModel {
+class FileOperation extends ParanoidModel<
+  InferAttributes<FileOperation>,
+  Partial<InferCreationAttributes<FileOperation>>
+> {
   @Column(DataType.ENUM(...Object.values(FileOperationType)))
   type: FileOperationType;
 
@@ -50,7 +58,7 @@ class FileOperation extends IdModel {
   key: string;
 
   @Column
-  url: string;
+  url?: string | null;
 
   @Column
   error: string | null;
@@ -73,7 +81,7 @@ class FileOperation extends IdModel {
         throw err;
       }
     }
-    await this.save();
+    return this.save();
   };
 
   /**
@@ -81,6 +89,13 @@ class FileOperation extends IdModel {
    */
   get stream() {
     return FileStorage.getFileStream(this.key);
+  }
+
+  /**
+   * The file operation contents as a handle which contains a path and cleanup function.
+   */
+  get handle() {
+    return FileStorage.getFileHandle(this.key);
   }
 
   // hooks
@@ -111,7 +126,7 @@ class FileOperation extends IdModel {
 
   @ForeignKey(() => Collection)
   @Column(DataType.UUID)
-  collectionId: string;
+  collectionId?: string | null;
 
   /**
    * Count the number of export file operations for a given team after a point

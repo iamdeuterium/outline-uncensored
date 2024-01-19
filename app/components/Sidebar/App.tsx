@@ -82,7 +82,10 @@ function AppSidebar() {
                   <ToggleButton
                     position="bottom"
                     image={<SidebarIcon />}
-                    onClick={ui.toggleCollapsedSidebar}
+                    onClick={() => {
+                      ui.toggleCollapsedSidebar();
+                      (document.activeElement as HTMLElement)?.blur();
+                    }}
                   />
                 </Tooltip>
               </SidebarButton>
@@ -109,9 +112,11 @@ function AppSidebar() {
                   label={
                     <Flex align="center" justify="space-between">
                       {t("Drafts")}
-                      <Drafts size="xsmall" type="tertiary">
-                        {documents.totalDrafts}
-                      </Drafts>
+                      {documents.totalDrafts > 0 ? (
+                        <Drafts size="xsmall" type="tertiary">
+                          {documents.totalDrafts}
+                        </Drafts>
+                      ) : null}
                     </Flex>
                   }
                 />

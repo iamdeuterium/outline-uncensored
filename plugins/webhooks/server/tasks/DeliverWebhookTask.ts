@@ -18,8 +18,8 @@ import {
   Revision,
   View,
   Share,
-  CollectionUser,
-  CollectionGroup,
+  UserPermission,
+  GroupPermission,
   GroupUser,
   Comment,
 } from "@server/models";
@@ -60,6 +60,7 @@ import {
   TeamEvent,
   UserEvent,
   ViewEvent,
+  WebhookDeliveryStatus,
   WebhookSubscriptionEvent,
 } from "@server/types";
 import fetch from "@server/utils/fetch";
@@ -426,7 +427,7 @@ export default class DeliverWebhookTask extends BaseTask<Props> {
     subscription: WebhookSubscription,
     event: CollectionUserEvent
   ): Promise<void> {
-    const model = await CollectionUser.scope([
+    const model = await UserPermission.scope([
       "withUser",
       "withCollection",
     ]).findOne({
@@ -441,9 +442,9 @@ export default class DeliverWebhookTask extends BaseTask<Props> {
       event,
       subscription,
       payload: {
-        id: `${event.userId}-${event.collectionId}`,
+        id: event.data.membershipId,
         model: model && presentMembership(model),
-        collection: model && presentCollection(model.collection),
+        collection: model && presentCollection(model.collection!),
         user: model && presentUser(model.user),
       },
     });
@@ -453,7 +454,7 @@ export default class DeliverWebhookTask extends BaseTask<Props> {
     subscription: WebhookSubscription,
     event: CollectionGroupEvent
   ): Promise<void> {
-    const model = await CollectionGroup.scope([
+    const model = await GroupPermission.scope([
       "withGroup",
       "withCollection",
     ]).findOne({
@@ -468,9 +469,9 @@ export default class DeliverWebhookTask extends BaseTask<Props> {
       event,
       subscription,
       payload: {
-        id: `${event.modelId}-${event.collectionId}`,
+        id: event.data.membershipId,
         model: model && presentCollectionGroupMembership(model),
-        collection: model && presentCollection(model.collection),
+        collection: model && presentCollection(model.collection!),
         group: model && presentGroup(model.group),
       },
     });
@@ -572,7 +573,8 @@ export default class DeliverWebhookTask extends BaseTask<Props> {
       status: "pending",
     });
 
-    let response, requestBody, requestHeaders, status;
+    let response, requestBody, requestHeaders;
+    let status: WebhookDeliveryStatus;
     try {
       requestBody = presentWebhook({
         event,

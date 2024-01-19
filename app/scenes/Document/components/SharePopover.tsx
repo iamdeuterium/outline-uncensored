@@ -6,6 +6,7 @@ import { ExpandedIcon, GlobeIcon, PadlockIcon } from "outline-icons";
 import * as React from "react";
 import { useTranslation, Trans } from "react-i18next";
 import { Link } from "react-router-dom";
+import { toast } from "sonner";
 import styled from "styled-components";
 import { s } from "@shared/styles";
 import { dateLocale, dateToRelative } from "@shared/utils/date";
@@ -23,14 +24,20 @@ import useCurrentTeam from "~/hooks/useCurrentTeam";
 import useKeyDown from "~/hooks/useKeyDown";
 import usePolicy from "~/hooks/usePolicy";
 import useStores from "~/hooks/useStores";
-import useToasts from "~/hooks/useToasts";
 import useUserLocale from "~/hooks/useUserLocale";
 
 type Props = {
+  /** The document to share. */
   document: Document;
+  /** The existing share model, if any. */
   share: Share | null | undefined;
+  /** The existing share parent model, if any. */
   sharedParent: Share | null | undefined;
+  /** Whether to hide the title. */
+  hideTitle?: boolean;
+  /** Callback fired when the popover requests to be closed. */
   onRequestClose: () => void;
+  /** Whether the popover is visible. */
   visible: boolean;
 };
 
@@ -38,20 +45,20 @@ function SharePopover({
   document,
   share,
   sharedParent,
+  hideTitle,
   onRequestClose,
   visible,
 }: Props) {
   const team = useCurrentTeam();
   const { t } = useTranslation();
   const { shares, collections } = useStores();
-  const { showToast } = useToasts();
   const [expandedOptions, setExpandedOptions] = React.useState(false);
   const [isEditMode, setIsEditMode] = React.useState(false);
   const [slugValidationError, setSlugValidationError] = React.useState("");
   const [urlSlug, setUrlSlug] = React.useState("");
   const timeout = React.useRef<ReturnType<typeof setTimeout>>();
   const buttonRef = React.useRef<HTMLButtonElement>(null);
-  const can = usePolicy(share ? share.id : "");
+  const can = usePolicy(share);
   const documentAbilities = usePolicy(document);
   const collection = document.collectionId
     ? collections.get(document.collectionId)
@@ -75,13 +82,13 @@ function SharePopover({
   useKeyDown("Escape", onRequestClose);
 
   React.useEffect(() => {
-    if (visible && team.sharing) {
+    if (visible) {
       void document.share();
       buttonRef.current?.focus();
     }
 
     return () => (timeout.current ? clearTimeout(timeout.current) : undefined);
-  }, [document, visible, team.sharing]);
+  }, [document, visible]);
 
   React.useEffect(() => {
     if (!visible) {
@@ -100,12 +107,10 @@ function SharePopover({
           published: event.currentTarget.checked,
         });
       } catch (err) {
-        showToast(err.message, {
-          type: "error",
-        });
+        toast.error(err.message);
       }
     },
-    [document.id, shares, showToast]
+    [document.id, shares]
   );
 
   const handleChildDocumentsChange = React.useCallback(
@@ -118,22 +123,18 @@ function SharePopover({
           includeChildDocuments: event.currentTarget.checked,
         });
       } catch (err) {
-        showToast(err.message, {
-          type: "error",
-        });
+        toast.error(err.message);
       }
     },
-    [document.id, shares, showToast]
+    [document.id, shares]
   );
 
   const handleCopied = React.useCallback(() => {
     timeout.current = setTimeout(() => {
       onRequestClose();
-      showToast(t("Share link copied"), {
-        type: "info",
-      });
+      toast.message(t("Share link copied"));
     }, 250);
-  }, [t, onRequestClose, showToast]);
+  }, [t, onRequestClose]);
 
   const handleUrlSlugChange = React.useMemo(
     () =>
@@ -208,11 +209,9 @@ function SharePopover({
 
   const userLocale = useUserLocale();
   const locale = userLocale ? dateLocale(userLocale) : undefined;
-  let shareUrl = team.sharing
-    ? sharedParent?.url
-      ? `${sharedParent.url}${document.url}`
-      : share?.url ?? ""
-    : `${team.url}${document.url}`;
+  let shareUrl = sharedParent?.url
+    ? `${sharedParent.url}${document.url}`
+    : share?.url ?? "";
   if (isEditMode) {
     shareUrl += "?edit=true";
   }
@@ -222,10 +221,16 @@ function SharePopover({
 
   return (
     <>
-      <Heading>
-        {isPubliclyShared ? <GlobeIcon size={28} /> : <PadlockIcon size={28} />}
-        <span>{t("Share this document")}</span>
-      </Heading>
+      {!hideTitle && (
+        <Heading>
+          {isPubliclyShared ? (
+            <GlobeIcon size={28} />
+          ) : (
+            <PadlockIcon size={28} />
+          )}
+          <span>{t("Share this document")}</span>
+        </Heading>
+      )}
 
       {sharedParent && !document.isDraft && (
         <NoticeWrapper>
@@ -335,7 +340,7 @@ function SharePopover({
         <CopyToClipboard text={shareUrl} onCopy={handleCopied}>
           <Button
             type="submit"
-            disabled={(!share && team.sharing) || slugValidationError}
+            disabled={!share || slugValidationError}
             ref={buttonRef}
           >
             {t("Copy link")}

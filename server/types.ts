@@ -8,7 +8,7 @@ import {
   Client,
   CollectionPermission,
 } from "@shared/types";
-import BaseSchema from "@server/routes/api/BaseSchema";
+import { BaseSchema } from "@server/routes/api/schema";
 import { AccountProvisionerResult } from "./commands/accountProvisioner";
 import { FileOperation, Team, User } from "./models";
 
@@ -199,15 +199,14 @@ export type CollectionUserEvent = BaseEvent & {
   name: "collections.add_user" | "collections.remove_user";
   userId: string;
   collectionId: string;
+  data: { name: string; membershipId: string };
 };
 
 export type CollectionGroupEvent = BaseEvent & {
   name: "collections.add_group" | "collections.remove_group";
   collectionId: string;
   modelId: string;
-  data: {
-    name: string;
-  };
+  data: { name: string; membershipId: string };
 };
 
 export type CollectionEvent = BaseEvent &
@@ -344,6 +343,8 @@ export type ViewEvent = BaseEvent & {
   };
 };
 
+export type WebhookDeliveryStatus = "pending" | "success" | "failed";
+
 export type WebhookSubscriptionEvent = BaseEvent & {
   name:
     | "webhookSubscriptions.create"
@@ -391,15 +392,15 @@ export type NotificationMetadata = {
 };
 
 export type JSONExportMetadata = {
-  /* The version of the export, allows updated structure in the future. */
+  /** The version of the export, allows updated structure in the future. */
   exportVersion: number;
-  /* The version of the application that created the export. */
+  /** The version of the application that created the export. */
   version: string;
-  /* The date the export was created. */
+  /** The date the export was created. */
   createdAt: string;
-  /* The ID of the user that created the export. */
+  /** The ID of the user that created the export. */
   createdById: string;
-  /* The email of the user that created the export. */
+  /** The email of the user that created the export. */
   createdByEmail: string | null;
 };
 

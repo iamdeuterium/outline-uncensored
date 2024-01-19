@@ -1,13 +1,15 @@
 import { observer } from "mobx-react";
-import { EditIcon, RestoreIcon } from "outline-icons";
+import { EditIcon, RestoreIcon, SearchIcon } from "outline-icons";
 import * as React from "react";
 import { useTranslation } from "react-i18next";
 import { useHistory } from "react-router-dom";
 import { useMenuState, MenuButton, MenuButtonHTMLProps } from "reakit/Menu";
 import { VisuallyHidden } from "reakit/VisuallyHidden";
+import { toast } from "sonner";
 import styled from "styled-components";
 import breakpoint from "styled-components-breakpoint";
 import { s, ellipsis } from "@shared/styles";
+import { UserPreference } from "@shared/types";
 import { getEventFiles } from "@shared/utils/files";
 import Document from "~/models/Document";
 import ContextMenu from "~/components/ContextMenu";
@@ -40,6 +42,8 @@ import {
   openDocumentComments,
   createDocumentFromTemplate,
   createNestedDocument,
+  shareDocument,
+  copyDocument,
 } from "~/actions/definitions/documents";
 import useActionContext from "~/hooks/useActionContext";
 import useCurrentUser from "~/hooks/useCurrentUser";
@@ -47,7 +51,6 @@ import useMobile from "~/hooks/useMobile";
 import usePolicy from "~/hooks/usePolicy";
 import useRequest from "~/hooks/useRequest";
 import useStores from "~/hooks/useStores";
-import useToasts from "~/hooks/useToasts";
 import { MenuItem } from "~/types";
 import { documentEditPath } from "~/utils/routeHelpers";
 
@@ -61,6 +64,8 @@ type Props = {
   showToggleEmbeds?: boolean;
   showPin?: boolean;
   label?: (props: MenuButtonHTMLProps) => React.ReactNode;
+  onFindAndReplace?: () => void;
+  onRename?: () => void;
   onOpen?: () => void;
   onClose?: () => void;
 };
@@ -72,12 +77,13 @@ function DocumentMenu({
   showToggleEmbeds,
   showDisplayOptions,
   label,
+  onFindAndReplace,
+  onRename,
   onOpen,
   onClose,
 }: Props) {
   const user = useCurrentUser();
   const { policies, collections, documents, subscriptions } = useStores();
-  const { showToast } = useToasts();
   const menu = useMenuState({
     modal,
     unstable_preventOverflow: true,
@@ -118,11 +124,9 @@ function DocumentMenu({
       }
     ) => {
       await document.restore(options);
-      showToast(t("Document restored"), {
-        type: "success",
-      });
+      toast.success(t("Document restored"));
     },
-    [showToast, t, document]
+    [t, document]
   );
 
   const collection = document.collectionId
@@ -185,13 +189,11 @@ function DocumentMenu({
         );
         history.push(importedDocument.url);
       } catch (err) {
-        showToast(err.message, {
-          type: "error",
-        });
+        toast.error(err.message);
         throw err;
       }
     },
-    [history, showToast, collection, documents, document.id]
+    [history, collection, documents, document.id]
   );
 
   return (
@@ -258,6 +260,14 @@ function DocumentMenu({
             actionToMenuItem(unstarDocument, context),
             actionToMenuItem(subscribeDocument, context),
             actionToMenuItem(unsubscribeDocument, context),
+            ...(isMobile ? [actionToMenuItem(shareDocument, context)] : []),
+            {
+              type: "button",
+              title: `${t("Find and replace")}…`,
+              visible: !!onFindAndReplace && isMobile,
+              onClick: () => onFindAndReplace?.(),
+              icon: <SearchIcon />,
+            },
             {
               type: "separator",
             },
@@ -267,6 +277,13 @@ function DocumentMenu({
               to: documentEditPath(document),
               visible:
                 !!can.update && user.separateEditMode && !document.template,
+              icon: <EditIcon />,
+            },
+            {
+              type: "button",
+              title: `${t("Rename")}…`,
+              visible: !!can.update && !user.separateEditMode && !!onRename,
+              onClick: () => onRename?.(),
               icon: <EditIcon />,
             },
             actionToMenuItem(createNestedDocument, context),
@@ -286,6 +303,7 @@ function DocumentMenu({
             actionToMenuItem(openDocumentHistory, context),
             actionToMenuItem(openDocumentInsights, context),
             actionToMenuItem(downloadDocument, context),
+            actionToMenuItem(copyDocument, context),
             actionToMenuItem(printDocument, context),
             {
               type: "separator",
@@ -297,35 +315,45 @@ function DocumentMenu({
         {(showDisplayOptions || showToggleEmbeds) && (
           <>
             <Separator />
-            {showToggleEmbeds && (
-              <Style>
-                <ToggleMenuItem
-                  width={26}
-                  height={14}
-                  label={t("Enable embeds")}
-                  checked={!document.embedsDisabled}
-                  onChange={
-                    document.embedsDisabled
-                      ? document.enableEmbeds
-                      : document.disableEmbeds
-                  }
-                />
-              </Style>
-            )}
-            {showDisplayOptions && !isMobile && can.update && (
-              <Style>
-                <ToggleMenuItem
-                  width={26}
-                  height={14}
-                  label={t("Full width")}
-                  checked={document.fullWidth}
-                  onChange={(ev) => {
-                    document.fullWidth = ev.currentTarget.checked;
-                    void document.save();
-                  }}
-                />
-              </Style>
-            )}
+            <DisplayOptions>
+              {showToggleEmbeds && (
+                <Style>
+                  <ToggleMenuItem
+                    width={26}
+                    height={14}
+                    label={t("Enable embeds")}
+                    labelPosition="left"
+                    checked={!document.embedsDisabled}
+                    onChange={
+                      document.embedsDisabled
+                        ? document.enableEmbeds
+                        : document.disableEmbeds
+                    }
+                  />
+                </Style>
+              )}
+              {showDisplayOptions && !isMobile && can.update && (
+                <Style>
+                  <ToggleMenuItem
+                    width={26}
+                    height={14}
+                    label={t("Full width")}
+                    labelPosition="left"
+                    checked={document.fullWidth}
+                    onChange={(ev) => {
+                      const fullWidth = ev.currentTarget.checked;
+                      user.setPreference(
+                        UserPreference.FullWidthDocuments,
+                        fullWidth
+                      );
+                      void user.save();
+                      document.fullWidth = fullWidth;
+                      void document.save();
+                    }}
+                  />
+                </Style>
+              )}
+            </DisplayOptions>
           </>
         )}
       </ContextMenu>
@@ -338,6 +366,10 @@ const ToggleMenuItem = styled(Switch)`
     font-weight: normal;
     color: ${s("textSecondary")};
   }
+`;
+
+const DisplayOptions = styled.div`
+  padding: 8px 0 0;
 `;
 
 const Style = styled.div`

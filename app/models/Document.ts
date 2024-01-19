@@ -1,27 +1,32 @@
 import { addDays, differenceInDays } from "date-fns";
-import { t } from "i18next";
+import i18n, { t } from "i18next";
 import floor from "lodash/floor";
 import { action, autorun, computed, observable, set } from "mobx";
 import { ExportContentType } from "@shared/types";
-import type { NavigationNode } from "@shared/types";
+import type { JSONObject, NavigationNode } from "@shared/types";
 import Storage from "@shared/utils/Storage";
 import { isRTL } from "@shared/utils/rtl";
 import slugify from "@shared/utils/slugify";
 import DocumentsStore from "~/stores/DocumentsStore";
 import User from "~/models/User";
+import type { Properties } from "~/types";
 import { client } from "~/utils/ApiClient";
 import { settingsPath } from "~/utils/routeHelpers";
+import Collection from "./Collection";
 import View from "./View";
 import ParanoidModel from "./base/ParanoidModel";
 import Field from "./decorators/Field";
+import Relation from "./decorators/Relation";
 
-type SaveOptions = {
+type SaveOptions = JSONObject & {
   publish?: boolean;
   done?: boolean;
   autosave?: boolean;
 };
 
 export default class Document extends ParanoidModel {
+  static modelName = "Document";
+
   constructor(fields: Record<string, any>, store: DocumentsStore) {
     super(fields, store);
 
@@ -56,6 +61,12 @@ export default class Document extends ParanoidModel {
   @Field
   @observable
   collectionId?: string | null;
+
+  /**
+   * The comment that this comment is a reply to.
+   */
+  @Relation(() => Collection, { onDelete: "cascade" })
+  collection?: Collection;
 
   /**
    * The text content of the document as Markdown.
@@ -242,11 +253,6 @@ export default class Document extends ParanoidModel {
   }
 
   @computed
-  get titleWithDefault(): string {
-    return this.title || "Untitled";
-  }
-
-  @computed
   get permanentlyDeletedAt(): string | undefined {
     if (!this.deletedAt) {
       return undefined;
@@ -277,6 +283,15 @@ export default class Document extends ParanoidModel {
     }
 
     return floor((this.tasks.completed / this.tasks.total) * 100);
+  }
+
+  @computed
+  get pathTo() {
+    return this.collection?.pathToDocument(this.id) ?? [];
+  }
+
+  get titleWithDefault(): string {
+    return this.title || i18n.t("Untitled");
   }
 
   @action
@@ -329,7 +344,7 @@ export default class Document extends ParanoidModel {
   };
 
   @action
-  star = () => this.store.star(this);
+  star = (index?: string) => this.store.star(this, index);
 
   @action
   unstar = () => this.store.unstar(this);
@@ -374,9 +389,9 @@ export default class Document extends ParanoidModel {
 
   @action
   save = async (
-    fields?: Partial<Document> | undefined,
-    options?: SaveOptions | undefined
-  ) => {
+    fields?: Properties<typeof this>,
+    options?: SaveOptions
+  ): Promise<Document> => {
     const params = fields ?? this.toAPI();
     this.isSaving = true;
 
@@ -400,7 +415,8 @@ export default class Document extends ParanoidModel {
   move = (collectionId: string, parentDocumentId?: string | undefined) =>
     this.store.move(this.id, collectionId, parentDocumentId);
 
-  duplicate = () => this.store.duplicate(this);
+  duplicate = (options?: { title?: string; recursive?: boolean }) =>
+    this.store.duplicate(this, options);
 
   getSummary = (paragraphs = 4) => {
     const result = this.text.trim().split("\n").slice(0, paragraphs).join("\n");

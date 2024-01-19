@@ -3,6 +3,11 @@ import fs from "fs";
 import path from "path";
 import { URL } from "url";
 import util from "util";
+import {
+  InferAttributes,
+  InferCreationAttributes,
+  type SaveOptions,
+} from "sequelize";
 import { Op } from "sequelize";
 import {
   Column,
@@ -12,14 +17,15 @@ import {
   Table,
   Unique,
   IsIn,
+  IsDate,
   HasMany,
   Scopes,
   Is,
   DataType,
   IsUUID,
-  IsUrl,
   AllowNull,
   AfterUpdate,
+  BeforeUpdate,
 } from "sequelize-typescript";
 import { TeamPreferenceDefaults } from "@shared/constants";
 import {
@@ -29,17 +35,20 @@ import {
 } from "@shared/types";
 import { getBaseDomain, RESERVED_SUBDOMAINS } from "@shared/utils/domains";
 import env from "@server/env";
+import { ValidationError } from "@server/errors";
 import DeleteAttachmentTask from "@server/queues/tasks/DeleteAttachmentTask";
 import parseAttachmentIds from "@server/utils/parseAttachmentIds";
 import Attachment from "./Attachment";
 import AuthenticationProvider from "./AuthenticationProvider";
 import Collection from "./Collection";
 import Document from "./Document";
+import Share from "./Share";
 import TeamDomain from "./TeamDomain";
 import User from "./User";
 import ParanoidModel from "./base/ParanoidModel";
 import Fix from "./decorators/Fix";
 import IsFQDN from "./validators/IsFQDN";
+import IsUrlOrRelativePath from "./validators/IsUrlOrRelativePath";
 import Length from "./validators/Length";
 import NotContainsUrl from "./validators/NotContainsUrl";
 
@@ -60,7 +69,10 @@ const readFile = util.promisify(fs.readFile);
 }))
 @Table({ tableName: "teams", modelName: "team" })
 @Fix
-class Team extends ParanoidModel {
+class Team extends ParanoidModel<
+  InferAttributes<Team>,
+  Partial<InferCreationAttributes<Team>>
+> {
   @NotContainsUrl
   @Length({ min: 2, max: 255, msg: "name must be between 2 to 255 characters" })
   @Column
@@ -97,7 +109,7 @@ class Team extends ParanoidModel {
   defaultCollectionId: string | null;
 
   @AllowNull
-  @IsUrl
+  @IsUrlOrRelativePath
   @Length({ max: 4096, msg: "avatarUrl must be 4096 characters or less" })
   @Column(DataType.STRING)
   get avatarUrl() {
@@ -147,7 +159,18 @@ class Team extends ParanoidModel {
   @Column(DataType.JSONB)
   preferences: TeamPreferences | null;
 
+  @IsDate
+  @Column
+  suspendedAt: Date | null;
+
   // getters
+
+  /**
+   * Returns whether the team has been suspended and is no longer accessible.
+   */
+  get isSuspended(): boolean {
+    return !!this.suspendedAt;
+  }
 
   /**
    * Returns whether the team has email login enabled. For self-hosted installs
@@ -156,9 +179,7 @@ class Team extends ParanoidModel {
    * @return {boolean} Whether to show email login options
    */
   get emailSigninEnabled(): boolean {
-    return (
-      this.guestSignin && (!!env.SMTP_HOST || env.ENVIRONMENT === "development")
-    );
+    return this.guestSignin && (!!env.SMTP_HOST || env.isDevelopment);
   }
 
   get url() {
@@ -261,7 +282,6 @@ class Team extends ParanoidModel {
             parentDocumentId: null,
             collectionId: collection.id,
             teamId: collection.teamId,
-            userId: collection.createdById,
             lastModifiedById: collection.createdById,
             createdById: collection.createdById,
             title,
@@ -328,16 +348,33 @@ class Team extends ParanoidModel {
 
   // hooks
 
+  @BeforeUpdate
+  static async checkDomain(model: Team, options: SaveOptions) {
+    if (!model.domain) {
+      return model;
+    }
+
+    model.domain = model.domain.toLowerCase();
+
+    const count = await Share.count({
+      ...options,
+      where: {
+        domain: model.domain,
+      },
+    });
+
+    if (count > 0) {
+      throw ValidationError("Domain is already in use");
+    }
+
+    return model;
+  }
+
   @AfterUpdate
   static deletePreviousAvatar = async (model: Team) => {
-    if (
-      model.previous("avatarUrl") &&
-      model.previous("avatarUrl") !== model.avatarUrl
-    ) {
-      const attachmentIds = parseAttachmentIds(
-        model.previous("avatarUrl"),
-        true
-      );
+    const previousAvatarUrl = model.previous("avatarUrl");
+    if (previousAvatarUrl && previousAvatarUrl !== model.avatarUrl) {
+      const attachmentIds = parseAttachmentIds(previousAvatarUrl, true);
       if (!attachmentIds.length) {
         return;
       }

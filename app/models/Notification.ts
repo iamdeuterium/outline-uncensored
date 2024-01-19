@@ -15,6 +15,8 @@ import Field from "./decorators/Field";
 import Relation from "./decorators/Relation";
 
 class Notification extends Model {
+  static modelName = "Notification";
+
   @Field
   @observable
   id: string;
@@ -47,7 +49,7 @@ class Notification extends Model {
   /**
    * The document that the notification is associated with.
    */
-  @Relation(() => Document)
+  @Relation(() => Document, { onDelete: "cascade" })
   document?: Document;
 
   /**
@@ -58,7 +60,7 @@ class Notification extends Model {
   /**
    * The comment that the notification is associated with.
    */
-  @Relation(() => Comment)
+  @Relation(() => Comment, { onDelete: "cascade" })
   comment?: Comment;
 
   /**

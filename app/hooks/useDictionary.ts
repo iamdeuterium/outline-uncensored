@@ -24,6 +24,7 @@ export default function useDictionary() {
       createLink: t("Create link"),
       createLinkError: t("Sorry, an error occurred creating the link"),
       createNewDoc: t("Create a new doc"),
+      createNewChildDoc: t("Create a new child doc"),
       deleteColumn: t("Delete column"),
       deleteRow: t("Delete row"),
       deleteTable: t("Delete table"),
@@ -72,8 +73,6 @@ export default function useDictionary() {
       mathBlock: t("Math block (LaTeX)"),
       tip: t("Tip"),
       tipNotice: t("Tip notice"),
-      showDiagram: t("Show diagram"),
-      showSource: t("Show source"),
       warning: t("Warning"),
       warningNotice: t("Warning notice"),
       success: t("Success"),
@@ -83,6 +82,8 @@ export default function useDictionary() {
       insertDateTime: t("Current date and time"),
       indent: t("Indent"),
       outdent: t("Outdent"),
+      video: t("Video"),
+      untitled: t("Untitled"),
     }),
     [t]
   );

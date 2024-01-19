@@ -3,7 +3,7 @@ import isUUID from "validator/lib/isUUID";
 import { z } from "zod";
 import { SHARE_URL_SLUG_REGEX, SLUG_URL_REGEX } from "@shared/utils/urlHelpers";
 import { Share } from "@server/models";
-import BaseSchema from "../BaseSchema";
+import { BaseSchema } from "../schema";
 
 export const SharesInfoSchema = BaseSchema.extend({
   body: z
@@ -68,6 +68,14 @@ export const SharesCreateSchema = BaseSchema.extend({
       .refine((val) => isUUID(val) || SLUG_URL_REGEX.test(val), {
         message: "must be uuid or url slug",
       }),
+    published: z.boolean().default(false),
+    urlId: z
+      .string()
+      .regex(SHARE_URL_SLUG_REGEX, {
+        message: "must contain only alphanumeric and dashes",
+      })
+      .optional(),
+    includeChildDocuments: z.boolean().default(false),
   }),
 });
 

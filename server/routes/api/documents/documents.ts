@@ -10,6 +10,7 @@ import { TeamPreference } from "@shared/types";
 import { subtractDate } from "@shared/utils/date";
 import slugify from "@shared/utils/slugify";
 import documentCreator from "@server/commands/documentCreator";
+import documentDuplicator from "@server/commands/documentDuplicator";
 import documentImporter from "@server/commands/documentImporter";
 import documentLoader from "@server/commands/documentLoader";
 import documentMover from "@server/commands/documentMover";
@@ -151,12 +152,15 @@ router.post(
       sort = "updatedAt";
     }
 
-    const documents = await Document.defaultScopeWithUser(user.id).findAll({
-      where,
-      order: [[sort, direction]],
-      offset: ctx.state.pagination.offset,
-      limit: ctx.state.pagination.limit,
-    });
+    const [documents, total] = await Promise.all([
+      Document.defaultScopeWithUser(user.id).findAll({
+        where,
+        order: [[sort, direction]],
+        offset: ctx.state.pagination.offset,
+        limit: ctx.state.pagination.limit,
+      }),
+      Document.count({ where }),
+    ]);
 
     // index sort is special because it uses the order of the documents in the
     // collection.documentStructure rather than a database column
@@ -171,7 +175,7 @@ router.post(
     );
     const policies = presentPolicies(user, documents);
     ctx.body = {
-      pagination: ctx.state.pagination,
+      pagination: { ...ctx.state.pagination, total },
       data,
       policies,
     };
@@ -242,28 +246,27 @@ router.post(
     const documents = await Document.scope([
       collectionScope,
       viewScope,
+      "withDrafts",
     ]).findAll({
       where: {
         teamId: user.teamId,
-        collectionId: {
-          [Op.or]: [{ [Op.in]: collectionIds }, { [Op.is]: null }],
-        },
         deletedAt: {
           [Op.ne]: null,
         },
+        [Op.or]: [
+          {
+            collectionId: {
+              [Op.in]: collectionIds,
+            },
+          },
+          {
+            createdById: user.id,
+            collectionId: {
+              [Op.is]: null,
+            },
+          },
+        ],
       },
-      include: [
-        {
-          model: User,
-          as: "createdBy",
-          paranoid: false,
-        },
-        {
-          model: User,
-          as: "updatedBy",
-          paranoid: false,
-        },
-      ],
       paranoid: false,
       order: [[sort, direction]],
       offset: ctx.state.pagination.offset,
@@ -399,9 +402,7 @@ router.post(
 
 router.post(
   "documents.info",
-  auth({
-    optional: true,
-  }),
+  auth({ optional: true }),
   validate(T.DocumentsInfoSchema),
   async (ctx: APIContext<T.DocumentsInfoReq>) => {
     const { id, shareId, apiVersion } = ctx.input.body;
@@ -506,9 +507,7 @@ router.post(
 router.post(
   "documents.export",
   rateLimiter(RateLimiterStrategy.FivePerMinute),
-  auth({
-    optional: true,
-  }),
+  auth({ optional: true }),
   validate(T.DocumentsExportSchema),
   async (ctx: APIContext<T.DocumentsExportReq>) => {
     const { id } = ctx.input.body;
@@ -530,6 +529,7 @@ router.post(
       content = await DocumentHelper.toHTML(document, {
         signedUrls: true,
         centered: true,
+        includeMermaid: true,
       });
     } else if (accept?.includes("application/pdf")) {
       throw IncorrectEditionError(
@@ -539,13 +539,8 @@ router.post(
       contentType = "text/markdown";
       content = DocumentHelper.toMarkdown(document);
     } else {
-      contentType = "application/json";
-      content = DocumentHelper.toMarkdown(document);
-    }
-
-    if (contentType === "application/json") {
       ctx.body = {
-        data: content,
+        data: DocumentHelper.toMarkdown(document),
       };
       return;
     }
@@ -577,26 +572,32 @@ router.post(
 
     await Promise.all(
       attachments.map(async (attachment) => {
-        try {
-          const location = path.join(
-            "attachments",
-            `${attachment.id}.${mime.extension(attachment.contentType)}`
-          );
-          zip.file(location, attachment.buffer, {
+        const location = path.join(
+          "attachments",
+          `${attachment.id}.${mime.extension(attachment.contentType)}`
+        );
+        zip.file(
+          location,
+          new Promise<Buffer>((resolve) => {
+            attachment.buffer.then(resolve).catch((err) => {
+              Logger.warn(`Failed to read attachment from storage`, {
+                attachmentId: attachment.id,
+                teamId: attachment.teamId,
+                error: err.message,
+              });
+              resolve(Buffer.from(""));
+            });
+          }),
+          {
             date: attachment.updatedAt,
             createFolders: true,
-          });
+          }
+        );
 
-          content = content.replace(
-            new RegExp(escapeRegExp(attachment.redirectUrl), "g"),
-            location
-          );
-        } catch (err) {
-          Logger.error(
-            `Failed to add attachment to archive: ${attachment.id}`,
-            err
-          );
-        }
+        content = content.replace(
+          new RegExp(escapeRegExp(attachment.redirectUrl), "g"),
+          location
+        );
       })
     );
 
@@ -686,12 +687,11 @@ router.post(
       // restore a document to a specific revision
       authorize(user, "update", document);
       const revision = await Revision.findByPk(revisionId);
-
       authorize(document, "restore", revision);
 
-      document.text = revision.text;
-      document.title = revision.title;
+      document.restoreFromRevision(revision);
       await document.save();
+
       await Event.create({
         name: "documents.restore",
         documentId: document.id,
@@ -768,9 +768,7 @@ router.post(
 
 router.post(
   "documents.search",
-  auth({
-    optional: true,
-  }),
+  auth({ optional: true }),
   pagination(),
   rateLimiter(RateLimiterStrategy.OneHundredPerMinute),
   validate(T.DocumentsSearchSchema),
@@ -890,44 +888,58 @@ router.post(
   auth({ member: true }),
   rateLimiter(RateLimiterStrategy.TwentyFivePerMinute),
   validate(T.DocumentsTemplatizeSchema),
+  transaction(),
   async (ctx: APIContext<T.DocumentsTemplatizeReq>) => {
     const { id } = ctx.input.body;
     const { user } = ctx.state.auth;
+    const { transaction } = ctx.state;
 
     const original = await Document.findByPk(id, {
       userId: user.id,
+      transaction,
     });
+
     authorize(user, "update", original);
 
-    const document = await Document.create({
-      editorVersion: original.editorVersion,
-      collectionId: original.collectionId,
-      teamId: original.teamId,
-      userId: user.id,
-      publishedAt: new Date(),
-      lastModifiedById: user.id,
-      createdById: user.id,
-      template: true,
-      emoji: original.emoji,
-      title: original.title,
-      text: original.text,
-    });
-    await Event.create({
-      name: "documents.create",
-      documentId: document.id,
-      collectionId: document.collectionId,
-      teamId: document.teamId,
-      actorId: user.id,
-      data: {
-        title: document.title,
+    const document = await Document.create(
+      {
+        editorVersion: original.editorVersion,
+        collectionId: original.collectionId,
+        teamId: original.teamId,
+        publishedAt: new Date(),
+        lastModifiedById: user.id,
+        createdById: user.id,
         template: true,
+        emoji: original.emoji,
+        title: original.title,
+        text: original.text,
       },
-      ip: ctx.request.ip,
-    });
+      {
+        transaction,
+      }
+    );
+    await Event.create(
+      {
+        name: "documents.create",
+        documentId: document.id,
+        collectionId: document.collectionId,
+        teamId: document.teamId,
+        actorId: user.id,
+        data: {
+          title: document.title,
+          template: true,
+        },
+        ip: ctx.request.ip,
+      },
+      {
+        transaction,
+      }
+    );
 
     // reload to get all of the data needed to present (user, collection etc)
     const reloaded = await Document.findByPk(document.id, {
       userId: user.id,
+      transaction,
     });
     invariant(reloaded, "document not found");
 
@@ -954,6 +966,7 @@ router.post(
     const document = await Document.findByPk(id, {
       userId: user.id,
       includeState: true,
+      transaction,
     });
     collection = document?.collection;
     authorize(user, "update", document);
@@ -970,7 +983,7 @@ router.post(
         );
         collection = await Collection.scope({
           method: ["withMembership", user.id],
-        }).findByPk(collectionId!);
+        }).findByPk(collectionId!, { transaction });
       }
       authorize(user, "createDocument", collection);
     }
@@ -1012,6 +1025,68 @@ router.post(
 );
 
 router.post(
+  "documents.duplicate",
+  auth(),
+  validate(T.DocumentsDuplicateSchema),
+  transaction(),
+  async (ctx: APIContext<T.DocumentsDuplicateReq>) => {
+    const { transaction } = ctx.state;
+    const { id, title, publish, recursive, collectionId, parentDocumentId } =
+      ctx.input.body;
+    const { user } = ctx.state.auth;
+
+    const document = await Document.findByPk(id, {
+      userId: user.id,
+      transaction,
+    });
+    authorize(user, "read", document);
+
+    const collection = collectionId
+      ? await Collection.scope({
+          method: ["withMembership", user.id],
+        }).findByPk(collectionId, { transaction })
+      : document?.collection;
+
+    if (collection) {
+      authorize(user, "updateDocument", collection);
+    }
+
+    if (parentDocumentId) {
+      const parent = await Document.findByPk(parentDocumentId, {
+        userId: user.id,
+        transaction,
+      });
+      authorize(user, "update", parent);
+
+      if (!parent.publishedAt) {
+        throw InvalidRequestError("Cannot duplicate document inside a draft");
+      }
+    }
+
+    const response = await documentDuplicator({
+      user,
+      collection,
+      document,
+      title,
+      publish,
+      transaction,
+      recursive,
+      parentDocumentId,
+      ip: ctx.request.ip,
+    });
+
+    ctx.body = {
+      data: {
+        documents: await Promise.all(
+          response.map((document) => presentDocument(document))
+        ),
+      },
+      policies: presentPolicies(user, response),
+    };
+  }
+);
+
+router.post(
   "documents.move",
   auth(),
   validate(T.DocumentsMoveSchema),
@@ -1022,17 +1097,19 @@ router.post(
     const { user } = ctx.state.auth;
     const document = await Document.findByPk(id, {
       userId: user.id,
+      transaction,
     });
     authorize(user, "move", document);
 
     const collection = await Collection.scope({
       method: ["withMembership", user.id],
-    }).findByPk(collectionId);
+    }).findByPk(collectionId, { transaction });
     authorize(user, "updateDocument", collection);
 
     if (parentDocumentId) {
       const parent = await Document.findByPk(parentDocumentId, {
         userId: user.id,
+        transaction,
       });
       authorize(user, "update", parent);
 
@@ -1176,7 +1253,7 @@ router.post(
     });
     authorize(user, "unpublish", document);
 
-    const childDocumentIds = await document.getChildDocumentIds();
+    const childDocumentIds = await document.findAllChildDocumentIds();
     if (childDocumentIds.length > 0) {
       throw InvalidRequestError(
         "Cannot unpublish document with child documents"
@@ -1232,6 +1309,7 @@ router.post(
         id: collectionId,
         teamId: user.teamId,
       },
+      transaction,
     });
     authorize(user, "createDocument", collection);
     let parentDocument;
@@ -1242,6 +1320,7 @@ router.post(
           id: parentDocumentId,
           collectionId: collection.id,
         },
+        transaction,
       });
       authorize(user, "read", parentDocument, {
         collection,
@@ -1249,17 +1328,23 @@ router.post(
     }
 
     const content = await fs.readFile(file.filepath);
+    const fileName = file.originalFilename ?? file.newFilename;
+    const mimeType = file.mimetype ?? "";
+
     const { text, state, title, emoji } = await documentImporter({
       user,
-      fileName: file.originalFilename ?? file.newFilename,
-      mimeType: file.mimetype ?? "",
+      fileName,
+      mimeType,
       content,
       ip: ctx.request.ip,
       transaction,
     });
 
     const document = await documentCreator({
-      source: "import",
+      sourceMetadata: {
+        fileName,
+        mimeType,
+      },
       title,
       emoji,
       text,
@@ -1274,10 +1359,10 @@ router.post(
 
     document.collection = collection;
 
-    return (ctx.body = {
+    ctx.body = {
       data: await presentDocument(document),
       policies: presentPolicies(user, [document]),
-    });
+    };
   }
 );
 
@@ -1289,14 +1374,16 @@ router.post(
   transaction(),
   async (ctx: APIContext<T.DocumentsCreateReq>) => {
     const {
-      title = "",
-      text = "",
+      title,
+      text,
+      emoji,
       publish,
       collectionId,
       parentDocumentId,
       fullWidth,
       templateId,
       template,
+      createdAt,
     } = ctx.input.body;
     const editorVersion = ctx.headers["x-editor-version"] as string | undefined;
 
@@ -1313,6 +1400,7 @@ router.post(
           id: collectionId,
           teamId: user.teamId,
         },
+        transaction,
       });
       authorize(user, "createDocument", collection);
     }
@@ -1336,6 +1424,7 @@ router.post(
     if (templateId) {
       templateDocument = await Document.findByPk(templateId, {
         userId: user.id,
+        transaction,
       });
       authorize(user, "read", templateDocument);
     }
@@ -1343,6 +1432,8 @@ router.post(
     const document = await documentCreator({
       title,
       text,
+      emoji,
+      createdAt,
       publish,
       collectionId,
       parentDocumentId,
@@ -1357,10 +1448,10 @@ router.post(
 
     document.collection = collection;
 
-    return (ctx.body = {
+    ctx.body = {
       data: await presentDocument(document),
       policies: presentPolicies(user, [document]),
-    });
+    };
   }
 );
 

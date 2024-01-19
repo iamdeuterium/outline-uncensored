@@ -22,6 +22,7 @@ import PageTitle from "~/components/PageTitle";
 import TeamLogo from "~/components/TeamLogo";
 import Text from "~/components/Text";
 import env from "~/env";
+import useCurrentUser from "~/hooks/useCurrentUser";
 import useLastVisitedPath from "~/hooks/useLastVisitedPath";
 import useQuery from "~/hooks/useQuery";
 import useStores from "~/hooks/useStores";
@@ -32,6 +33,7 @@ import { detectLanguage } from "~/utils/language";
 import AuthenticationProvider from "./components/AuthenticationProvider";
 import BackButton from "./components/BackButton";
 import Notices from "./components/Notices";
+import { getRedirectUrl } from "./getRedirectUrl";
 
 type Props = {
   children?: (config?: Config) => React.ReactNode;
@@ -43,12 +45,13 @@ function Login({ children }: Props) {
   const notice = query.get("notice");
 
   const { t } = useTranslation();
+  const user = useCurrentUser({ rejectOnEmpty: false });
   const { auth } = useStores();
   const { config } = auth;
   const [error, setError] = React.useState(null);
   const [emailLinkSentTo, setEmailLinkSentTo] = React.useState("");
   const isCreate = location.pathname === "/create";
-  const rememberLastPath = !!auth.user?.getPreference(
+  const rememberLastPath = !!user?.getPreference(
     UserPreference.RememberLastPath
   );
   const [lastVisitedPath] = useLastVisitedPath();
@@ -223,6 +226,12 @@ function Login({ children }: Props) {
         </Centered>
       </Background>
     );
+  }
+
+  // If there is only one provider and it's OIDC, redirect immediately.
+  if (config.providers.length === 1 && config.providers[0].id === "oidc") {
+    window.location.href = getRedirectUrl(config.providers[0].authUrl);
+    return null;
   }
 
   return (

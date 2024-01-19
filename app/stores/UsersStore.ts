@@ -2,13 +2,22 @@ import invariant from "invariant";
 import filter from "lodash/filter";
 import orderBy from "lodash/orderBy";
 import { observable, computed, action, runInAction } from "mobx";
-import { UserRole } from "@shared/types";
+import { type JSONObject, UserRole } from "@shared/types";
 import User from "~/models/User";
 import { client } from "~/utils/ApiClient";
 import RootStore from "./RootStore";
-import Store from "./base/Store";
+import Store, { RPCAction } from "./base/Store";
 
 export default class UsersStore extends Store<User> {
+  actions = [
+    RPCAction.Info,
+    RPCAction.List,
+    RPCAction.Create,
+    RPCAction.Update,
+    RPCAction.Delete,
+    RPCAction.Count,
+  ];
+
   @observable
   counts: {
     active: number;
@@ -84,7 +93,7 @@ export default class UsersStore extends Store<User> {
     try {
       this.updateCounts(UserRole.Admin, user.role);
       await this.actionOnUser("promote", user);
-    } catch {
+    } catch (_e) {
       this.updateCounts(user.role, UserRole.Admin);
     }
   };
@@ -94,7 +103,7 @@ export default class UsersStore extends Store<User> {
     try {
       this.updateCounts(to, user.role);
       await this.actionOnUser("demote", user, to);
-    } catch {
+    } catch (_e) {
       this.updateCounts(user.role, to);
     }
   };
@@ -105,7 +114,7 @@ export default class UsersStore extends Store<User> {
       this.counts.suspended += 1;
       this.counts.active -= 1;
       await this.actionOnUser("suspend", user);
-    } catch {
+    } catch (_e) {
       this.counts.suspended -= 1;
       this.counts.active += 1;
     }
@@ -117,7 +126,7 @@ export default class UsersStore extends Store<User> {
       this.counts.suspended -= 1;
       this.counts.active += 1;
       await this.actionOnUser("activate", user);
-    } catch {
+    } catch (_e) {
       this.counts.suspended += 1;
       this.counts.active -= 1;
     }
@@ -179,7 +188,7 @@ export default class UsersStore extends Store<User> {
   };
 
   @action
-  async delete(user: User, options: Record<string, any> = {}) {
+  async delete(user: User, options: JSONObject = {}) {
     await super.delete(user, options);
 
     if (!user.isSuspended && user.lastActiveAt) {

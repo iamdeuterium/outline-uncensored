@@ -25,10 +25,18 @@ import { altDisplay, isModKey, metaDisplay } from "~/utils/keyboard";
 import { useEditor } from "./EditorContext";
 
 type Props = {
+  open: boolean;
+  onOpen: () => void;
+  onClose: () => void;
   readOnly?: boolean;
 };
 
-export default function FindAndReplace({ readOnly }: Props) {
+export default function FindAndReplace({
+  readOnly,
+  open,
+  onOpen,
+  onClose,
+}: Props) {
   const editor = useEditor();
   const finalFocusRef = React.useRef<HTMLElement>(
     editor.view.dom.parentElement
@@ -45,6 +53,12 @@ export default function FindAndReplace({ readOnly }: Props) {
   const [replaceTerm, setReplaceTerm] = React.useState("");
   const popover = usePopoverState();
   const { show } = popover;
+
+  React.useEffect(() => {
+    if (open) {
+      show();
+    }
+  }, [open]);
 
   // Hooks for desktop app menu items
   React.useEffect(() => {
@@ -198,7 +212,7 @@ export default function FindAndReplace({ readOnly }: Props) {
 
   const style: React.CSSProperties = React.useMemo(
     () => ({
-      position: "absolute",
+      position: "fixed",
       left: "initial",
       top: 60,
       right: 16,
@@ -209,6 +223,7 @@ export default function FindAndReplace({ readOnly }: Props) {
 
   React.useEffect(() => {
     if (popover.visible) {
+      onOpen();
       const startSearchText = selectionRef.current || searchTerm;
 
       editor.commands.find({
@@ -225,6 +240,7 @@ export default function FindAndReplace({ readOnly }: Props) {
         setSearchTerm(selectionRef.current);
       }
     } else {
+      onClose();
       setShowReplace(false);
       editor.commands.clearSearch();
     }
@@ -263,6 +279,7 @@ export default function FindAndReplace({ readOnly }: Props) {
         unstable_finalFocusRef={finalFocusRef}
         style={style}
         aria-label={t("Find and replace")}
+        scrollable={false}
         width={420}
       >
         <Content column>
@@ -347,6 +364,7 @@ const SearchModifiers = styled(Flex)`
 `;
 
 const StyledInput = styled(Input)`
+  width: 196px;
   flex: 1;
 `;
 
@@ -365,4 +383,5 @@ const ButtonLarge = styled(ButtonSmall)`
 const Content = styled(Flex)`
   padding: 8px 0;
   margin-bottom: -16px;
+  position: static;
 `;

@@ -1,14 +1,7 @@
-import BlockMenu from "../extensions/BlockMenu";
-import ClipboardTextSerializer from "../extensions/ClipboardTextSerializer";
 import DateTime from "../extensions/DateTime";
-import FindAndReplace from "../extensions/FindAndReplace";
 import History from "../extensions/History";
-import Keys from "../extensions/Keys";
 import MaxLength from "../extensions/MaxLength";
-import PasteHandler from "../extensions/PasteHandler";
 import Placeholder from "../extensions/Placeholder";
-import PreventTab from "../extensions/PreventTab";
-import SmartText from "../extensions/SmartText";
 import TrailingNode from "../extensions/TrailingNode";
 import Extension from "../lib/Extension";
 import Bold from "../marks/Bold";
@@ -49,6 +42,7 @@ import TableCell from "./TableCell";
 import TableHeadCell from "./TableHeadCell";
 import TableRow from "./TableRow";
 import Text from "./Text";
+import Video from "./Video";
 
 type Nodes = (typeof Node | typeof Mark | typeof Extension)[];
 
@@ -69,14 +63,25 @@ export const basicExtensions: Nodes = [
   Link,
   Strikethrough,
   History,
-  SmartText,
   TrailingNode,
-  PasteHandler,
   Placeholder,
   MaxLength,
   DateTime,
-  Keys,
-  ClipboardTextSerializer,
+];
+
+export const listExtensions: Nodes = [
+  CheckboxList,
+  CheckboxItem,
+  BulletList,
+  OrderedList,
+  ListItem,
+];
+
+export const tableExtensions: Nodes = [
+  Table,
+  TableCell,
+  TableHeadCell,
+  TableRow,
 ];
 
 /**
@@ -85,35 +90,26 @@ export const basicExtensions: Nodes = [
  */
 export const richExtensions: Nodes = [
   ...basicExtensions.filter((n) => n !== SimpleImage),
+  ...listExtensions,
+  ...tableExtensions,
   Image,
   HardBreak,
   CodeBlock,
   CodeFence,
-  CheckboxList,
-  CheckboxItem,
   Blockquote,
-  BulletList,
-  OrderedList,
   Embed,
-  ListItem,
   Attachment,
+  Video,
   Notice,
   Heading,
   HorizontalRule,
-  Table,
-  TableCell,
-  TableHeadCell,
-  TableRow,
   Highlight,
   TemplatePlaceholder,
-  BlockMenu,
   Math,
   MathBlock,
-  PreventTab,
-  FindAndReplace,
 ];
 
 /**
  * Add commenting and mentions to a set of nodes
  */
-export const withComments = (nodes: Nodes) => [Mention, Comment, ...nodes];
+export const withComments = (nodes: Nodes) => [...nodes, Mention, Comment];

@@ -1,8 +1,15 @@
+/* eslint-disable lines-between-class-members */
 import compact from "lodash/compact";
 import isNil from "lodash/isNil";
 import uniq from "lodash/uniq";
 import randomstring from "randomstring";
-import type { SaveOptions } from "sequelize";
+import type {
+  Identifier,
+  InferAttributes,
+  InferCreationAttributes,
+  NonNullFindOptions,
+  SaveOptions,
+} from "sequelize";
 import {
   Sequelize,
   Transaction,
@@ -10,6 +17,7 @@ import {
   FindOptions,
   ScopeOptions,
   WhereOptions,
+  EmptyResultError,
 } from "sequelize";
 import {
   ForeignKey,
@@ -30,13 +38,19 @@ import {
   Length as SimpleLength,
   IsNumeric,
   IsDate,
+  AllowNull,
 } from "sequelize-typescript";
 import isUUID from "validator/lib/isUUID";
-import type { NavigationNode } from "@shared/types";
+import type {
+  NavigationNode,
+  ProsemirrorData,
+  SourceMetadata,
+} from "@shared/types";
 import getTasks from "@shared/utils/getTasks";
 import slugify from "@shared/utils/slugify";
 import { SLUG_URL_REGEX } from "@shared/utils/urlHelpers";
 import { DocumentValidation } from "@shared/validations";
+import { ValidationError } from "@server/errors";
 import Backlink from "./Backlink";
 import Collection from "./Collection";
 import FileOperation from "./FileOperation";
@@ -51,6 +65,12 @@ import DocumentHelper from "./helpers/DocumentHelper";
 import Length from "./validators/Length";
 
 export const DOCUMENT_VERSION = 2;
+
+type AdditionalFindOptions = {
+  userId?: string;
+  includeState?: boolean;
+  rejectOnEmpty?: boolean | Error;
+};
 
 @DefaultScope(() => ({
   attributes: {
@@ -71,6 +91,11 @@ export const DOCUMENT_VERSION = 2;
   where: {
     publishedAt: {
       [Op.ne]: null,
+    },
+    sourceMetadata: {
+      trial: {
+        [Op.is]: null,
+      },
     },
   },
 }))
@@ -167,7 +192,10 @@ export const DOCUMENT_VERSION = 2;
 }))
 @Table({ tableName: "documents", modelName: "document" })
 @Fix
-class Document extends ParanoidModel {
+class Document extends ParanoidModel<
+  InferAttributes<Document>,
+  Partial<InferCreationAttributes<Document>>
+> {
   @SimpleLength({
     min: 10,
     max: 10,
@@ -189,17 +217,20 @@ class Document extends ParanoidModel {
 
   @IsNumeric
   @Column(DataType.SMALLINT)
-  version: number;
+  version?: number | null;
 
+  @Default(false)
   @Column
   template: boolean;
 
+  @Default(false)
   @Column
   fullWidth: boolean;
 
   @Column
   insightsEnabled: boolean;
 
+  /** The version of the editor last used to edit this document. */
   @SimpleLength({
     max: 255,
     msg: `editorVersion must be 255 characters or less`,
@@ -207,6 +238,7 @@ class Document extends ParanoidModel {
   @Column
   editorVersion: string;
 
+  /** An emoji to use as the document icon. */
   @Length({
     max: 1,
     msg: `Emoji must be a single character`,
@@ -214,44 +246,75 @@ class Document extends ParanoidModel {
   @Column
   emoji: string | null;
 
+  /**
+   * The content of the document as Markdown.
+   *
+   * @deprecated Use `content` instead, or `DocumentHelper.toMarkdown` if exporting lossy markdown.
+   * This column will be removed in a future migration.
+   */
   @Column(DataType.TEXT)
   text: string;
 
+  /**
+   * The content of the document as JSON, this is a snapshot at the last time the state was saved.
+   */
+  @Column(DataType.JSONB)
+  content: ProsemirrorData;
+
+  /**
+   * The content of the document as YJS collaborative state, this column can be quite large and
+   * should only be selected from the DB when the `content` snapshot cannot be used.
+   */
   @SimpleLength({
     max: DocumentValidation.maxStateLength,
     msg: `Document collaborative state is too large, you must create a new document`,
   })
   @Column(DataType.BLOB)
-  state: Uint8Array;
+  state?: Uint8Array | null;
 
+  /** Whether this document is part of onboarding. */
   @Default(false)
   @Column
   isWelcome: boolean;
 
+  /** How many versions there are in the history of this document. */
   @IsNumeric
   @Default(0)
   @Column(DataType.INTEGER)
   revisionCount: number;
 
+  /** Whether the document is archvied, and if so when. */
   @IsDate
   @Column
   archivedAt: Date | null;
 
+  /** Whether the document is published, and if so when. */
   @IsDate
   @Column
   publishedAt: Date | null;
 
+  /** An array of user IDs that have edited this document. */
   @Column(DataType.ARRAY(DataType.UUID))
   collaboratorIds: string[] = [];
 
   // getters
 
+  /**
+   * The frontend path to this document.
+   *
+   * @deprecated Use `path` instead.
+   */
   get url() {
     if (!this.title) {
       return `/doc/untitled-${this.urlId}`;
     }
     const slugifiedTitle = slugify(this.title);
     return `/doc/${slugifiedTitle}-${this.urlId}`;
+  }
+
+  /** The frontend path to this document. */
+  get path() {
+    return this.url;
   }
 
   get tasks() {
@@ -333,14 +396,13 @@ class Document extends ParanoidModel {
     // ensure documents have a title
     model.title = model.title || "";
 
-    if (model.previous("title") && model.previous("title") !== model.title) {
+    const previousTitle = model.previous("title");
+    if (previousTitle && previousTitle !== model.title) {
       if (!model.previousTitles) {
         model.previousTitles = [];
       }
 
-      model.previousTitles = uniq(
-        model.previousTitles.concat(model.previous("title"))
-      );
+      model.previousTitles = uniq(model.previousTitles.concat(previousTitle));
     }
 
     // add the current user as a collaborator on this doc
@@ -348,12 +410,44 @@ class Document extends ParanoidModel {
       model.collaboratorIds = [];
     }
 
+    // backfill content if it's missing
+    if (!model.content) {
+      model.content = DocumentHelper.toJSON(model);
+    }
+
+    // ensure the last modifying user is a collaborator
     model.collaboratorIds = uniq(
       model.collaboratorIds.concat(model.lastModifiedById)
     );
 
     // increment revision
     model.revisionCount += 1;
+  }
+
+  @BeforeUpdate
+  static async checkParentDocument(model: Document, options: SaveOptions) {
+    if (
+      model.previous("parentDocumentId") === model.parentDocumentId ||
+      !model.parentDocumentId
+    ) {
+      return;
+    }
+
+    if (model.parentDocumentId === model.id) {
+      throw ValidationError(
+        "infinite loop detected, cannot nest a document inside itself"
+      );
+    }
+
+    const childDocumentIds = await model.findAllChildDocumentIds(
+      undefined,
+      options
+    );
+    if (childDocumentIds.includes(model.parentDocumentId)) {
+      throw ValidationError(
+        "infinite loop detected, cannot nest a document inside itself"
+      );
+    }
   }
 
   // associations
@@ -364,6 +458,10 @@ class Document extends ParanoidModel {
   @ForeignKey(() => FileOperation)
   @Column(DataType.UUID)
   importId: string | null;
+
+  @AllowNull
+  @Column(DataType.JSONB)
+  sourceMetadata: SourceMetadata | null;
 
   @BelongsTo(() => Document, "parentDocumentId")
   parentDocument: Document | null;
@@ -429,43 +527,76 @@ class Document extends ParanoidModel {
     return this.scope(["defaultScope", collectionScope, viewScope]);
   }
 
+  /**
+   * Overrides the standard findByPk behavior to allow also querying by urlId
+   *
+   * @param id uuid or urlId
+   * @param options FindOptions
+   * @returns A promise resolving to a collection instance or null
+   */
   static async findByPk(
-    id: string,
-    options: FindOptions<Document> & {
-      userId?: string;
-      includeState?: boolean;
-    } = {}
+    id: Identifier,
+    options?: NonNullFindOptions<Document> & AdditionalFindOptions
+  ): Promise<Document>;
+  static async findByPk(
+    id: Identifier,
+    options?: FindOptions<Document> & AdditionalFindOptions
+  ): Promise<Document | null>;
+  static async findByPk(
+    id: Identifier,
+    options: (NonNullFindOptions<Document> | FindOptions<Document>) &
+      AdditionalFindOptions = {}
   ): Promise<Document | null> {
+    if (typeof id !== "string") {
+      return null;
+    }
+
+    const { includeState, userId, ...rest } = options;
+
     // allow default preloading of collection membership if `userId` is passed in find options
     // almost every endpoint needs the collection membership to determine policy permissions.
     const scope = this.scope([
-      ...(options.includeState ? [] : ["withoutState"]),
+      ...(includeState ? [] : ["withoutState"]),
       "withDrafts",
       {
-        method: ["withCollectionPermissions", options.userId, options.paranoid],
+        method: ["withCollectionPermissions", userId, rest.paranoid],
       },
       {
-        method: ["withViews", options.userId],
+        method: ["withViews", userId],
       },
     ]);
 
     if (isUUID(id)) {
-      return scope.findOne({
+      const document = await scope.findOne({
         where: {
           id,
         },
-        ...options,
+        ...rest,
+        rejectOnEmpty: false,
       });
+
+      if (!document && rest.rejectOnEmpty) {
+        throw new EmptyResultError(`Document doesn't exist with id: ${id}`);
+      }
+
+      return document;
     }
 
     const match = id.match(SLUG_URL_REGEX);
     if (match) {
-      return scope.findOne({
+      const document = await scope.findOne({
         where: {
           urlId: match[1],
         },
-        ...options,
+        ...rest,
+        rejectOnEmpty: false,
       });
+
+      if (!document && rest.rejectOnEmpty) {
+        throw new EmptyResultError(`Document doesn't exist with id: ${id}`);
+      }
+
+      return document;
     }
 
     return null;
@@ -492,9 +623,39 @@ class Document extends ParanoidModel {
     return !this.publishedAt;
   }
 
+  /**
+   * Returns the title of the document or a default if the document is untitled.
+   *
+   * @returns boolean
+   */
   get titleWithDefault(): string {
     return this.title || "Untitled";
   }
+
+  /**
+   * Whether this document was imported during a trial period.
+   *
+   * @returns boolean
+   */
+  get isTrialImport() {
+    return !!(this.importId && this.sourceMetadata?.trial);
+  }
+
+  /**
+   * Revert the state of the document to match the passed revision.
+   *
+   * @param revision The revision to revert to.
+   */
+  restoreFromRevision = (revision: Revision) => {
+    if (revision.documentId !== this.id) {
+      throw new Error("Revision does not belong to this document");
+    }
+
+    this.content = revision.content;
+    this.text = revision.text;
+    this.title = revision.title;
+    this.emoji = revision.emoji;
+  };
 
   /**
    * Get a list of users that have collaborated on this document
@@ -513,18 +674,36 @@ class Document extends ParanoidModel {
   };
 
   /**
+   * Find all of the child documents for this document
+   *
+   * @param options FindOptions
+   * @returns A promise that resolve to a list of documents
+   */
+  findChildDocuments = async (
+    where?: Omit<WhereOptions<Document>, "parentDocumentId">,
+    options?: FindOptions<Document>
+  ): Promise<Document[]> =>
+    await (this.constructor as typeof Document).findAll({
+      where: {
+        parentDocumentId: this.id,
+        ...where,
+      },
+      ...options,
+    });
+
+  /**
    * Calculate all of the document ids that are children of this document by
-   * iterating through parentDocumentId references in the most efficient way.
+   * recursively iterating through parentDocumentId references in the most efficient way.
    *
    * @param where query options to further filter the documents
    * @param options FindOptions
    * @returns A promise that resolves to a list of document ids
    */
-  getChildDocumentIds = async (
+  findAllChildDocumentIds = async (
     where?: Omit<WhereOptions<Document>, "parentDocumentId">,
     options?: FindOptions<Document>
   ): Promise<string[]> => {
-    const getChildDocumentIds = async (
+    const findAllChildDocumentIds = async (
       ...parentDocumentId: string[]
     ): Promise<string[]> => {
       const childDocuments = await (
@@ -543,14 +722,14 @@ class Document extends ParanoidModel {
       if (childDocumentIds.length > 0) {
         return [
           ...childDocumentIds,
-          ...(await getChildDocumentIds(...childDocumentIds)),
+          ...(await findAllChildDocumentIds(...childDocumentIds)),
         ];
       }
 
       return childDocumentIds;
     };
 
-    return getChildDocumentIds(this.id);
+    return findAllChildDocumentIds(this.id);
   };
 
   archiveWithChildren = async (
@@ -690,7 +869,7 @@ class Document extends ParanoidModel {
         }
       }
 
-      if (!this.template && collection) {
+      if (!this.template && this.publishedAt && collection) {
         await collection.addDocumentToStructure(this, undefined, {
           transaction,
         });

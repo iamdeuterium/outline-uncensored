@@ -1,5 +1,7 @@
+/* eslint-disable @typescript-eslint/ban-types */
 import { Location, LocationDescriptor } from "history";
 import { TFunction } from "i18next";
+import { JSONValue } from "@shared/types";
 import RootStore from "~/stores/RootStore";
 import Document from "./models/Document";
 import FileOperation from "./models/FileOperation";
@@ -121,19 +123,6 @@ export type LocationWithState = Location & {
   state: Record<string, string>;
 };
 
-export type Toast = {
-  id: string;
-  createdAt: string;
-  message: string;
-  type: "warning" | "error" | "info" | "success" | "loading";
-  timeout?: number;
-  reoccurring?: number;
-  action?: {
-    text: string;
-    onClick: React.MouseEventHandler<HTMLSpanElement>;
-  };
-};
-
 export type FetchOptions = {
   prefetch?: boolean;
   revisionId?: string;
@@ -177,15 +166,6 @@ export type SearchResult = {
   document: Document;
 };
 
-export type ToastOptions = {
-  type: "warning" | "error" | "info" | "success" | "loading";
-  timeout?: number;
-  action?: {
-    text: string;
-    onClick: React.MouseEventHandler<HTMLSpanElement>;
-  };
-};
-
 export type WebsocketEntityDeletedEvent = {
   modelId: string;
 };
@@ -219,4 +199,11 @@ export type WebsocketEvent =
 
 export type AwarenessChangeEvent = {
   states: { user?: { id: string }; cursor: any; scrollY: number | undefined }[];
+};
+
+// TODO: Can we make this type driven by the @Field decorator
+export type Properties<C> = {
+  [Property in keyof C as C[Property] extends JSONValue
+    ? Property
+    : never]?: C[Property];
 };

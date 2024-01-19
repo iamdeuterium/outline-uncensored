@@ -1,6 +1,6 @@
 import { traceFunction } from "@server/logging/tracing";
 import { Document } from "@server/models";
-import DocumentHelper from "@server/models/helpers/DocumentHelper";
+import TextHelper from "@server/models/helpers/TextHelper";
 import presentUser from "./user";
 
 type Options = {
@@ -16,10 +16,7 @@ async function presentDocument(
     ...options,
   };
   const text = options.isPublic
-    ? await DocumentHelper.attachmentsToSignedUrls(
-        document.text,
-        document.teamId
-      )
+    ? await TextHelper.attachmentsToSignedUrls(document.text, document.teamId)
     : document.text;
 
   const data: Record<string, any> = {
@@ -38,11 +35,8 @@ async function presentDocument(
     archivedAt: document.archivedAt,
     deletedAt: document.deletedAt,
     teamId: document.teamId,
-    template: document.template,
-    templateId: document.templateId,
     collaboratorIds: [],
     revision: document.revisionCount,
-    insightsEnabled: document.insightsEnabled,
     fullWidth: document.fullWidth,
     collectionId: undefined,
     parentDocumentId: undefined,
@@ -59,6 +53,9 @@ async function presentDocument(
     data.createdBy = presentUser(document.createdBy);
     data.updatedBy = presentUser(document.updatedBy);
     data.collaboratorIds = document.collaboratorIds;
+    data.templateId = document.templateId;
+    data.template = document.template;
+    data.insightsEnabled = document.insightsEnabled;
   }
 
   return data;

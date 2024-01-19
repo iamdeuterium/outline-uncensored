@@ -18,6 +18,7 @@ import {
   IsBoolean,
   MaxLength,
 } from "class-validator";
+import uniq from "lodash/uniq";
 import { languages } from "@shared/i18n";
 import { CannotUseWithout } from "@server/utils/validators";
 import Deprecated from "./models/decorators/Deprecated";
@@ -40,7 +41,7 @@ export class Environment {
   }
 
   /**
-   * The current envionment name.
+   * The current environment name.
    */
   @IsIn(["development", "production", "staging", "test"])
   public ENVIRONMENT = process.env.NODE_ENV ?? "production";
@@ -123,7 +124,11 @@ export class Environment {
    * The fully qualified, external facing domain name of the server.
    */
   @IsNotEmpty()
-  @IsUrl({ require_tld: false })
+  @IsUrl({
+    protocols: ["http", "https"],
+    require_protocol: true,
+    require_tld: false,
+  })
   public URL = process.env.URL || "";
 
   /**
@@ -133,14 +138,22 @@ export class Environment {
    * should be set to the same as URL.
    */
   @IsOptional()
-  @IsUrl()
+  @IsUrl({
+    protocols: ["http", "https"],
+    require_protocol: true,
+    require_tld: false,
+  })
   public CDN_URL = this.toOptionalString(process.env.CDN_URL);
 
   /**
    * The fully qualified, external facing domain name of the collaboration
    * service, if different (unlikely)
    */
-  @IsUrl({ require_tld: false, protocols: ["http", "https", "ws", "wss"] })
+  @IsUrl({
+    require_tld: false,
+    require_protocol: true,
+    protocols: ["http", "https", "ws", "wss"],
+  })
   @IsOptional()
   public COLLABORATION_URL = this.toOptionalString(
     process.env.COLLABORATION_URL
@@ -214,16 +227,20 @@ export class Environment {
   public DEFAULT_LANGUAGE = process.env.DEFAULT_LANGUAGE ?? "en_US";
 
   /**
-   * A comma separated list of which services should be enabled on this
-   * instance – defaults to all.
+   * A comma list of which services should be enabled on this instance – defaults to all.
    *
    * If a services flag is passed it takes priority over the environment variable
    * for example: --services=web,worker
    */
-  public SERVICES =
-    getArg("services") ??
-    process.env.SERVICES ??
-    "collaboration,websockets,worker,web";
+  public SERVICES = uniq(
+    (
+      getArg("services") ??
+      process.env.SERVICES ??
+      "collaboration,websockets,worker,web"
+    )
+      .split(",")
+      .map((service) => service.toLowerCase().trim())
+  );
 
   /**
    * Auto-redirect to https in production. The default is true but you may set
@@ -425,7 +442,7 @@ export class Environment {
   );
 
   /**
-   * OICD client credentials. To enable authentication with any
+   * OIDC client credentials. To enable authentication with any
    * compatible provider.
    */
   @IsOptional()
@@ -545,12 +562,14 @@ export class Environment {
     this.toOptionalNumber(process.env.RATE_LIMITER_DURATION_WINDOW) ?? 60;
 
   /**
-   * Set max allowed upload size for file attachments.
+   * @deprecated Set max allowed upload size for file attachments.
    */
   @IsOptional()
   @IsNumber()
-  public AWS_S3_UPLOAD_MAX_SIZE =
-    this.toOptionalNumber(process.env.AWS_S3_UPLOAD_MAX_SIZE) ?? 100000000;
+  @Deprecated("Use FILE_STORAGE_UPLOAD_MAX_SIZE instead")
+  public AWS_S3_UPLOAD_MAX_SIZE = this.toOptionalNumber(
+    process.env.AWS_S3_UPLOAD_MAX_SIZE
+  );
 
   /**
    * Access key ID for AWS S3.
@@ -613,6 +632,28 @@ export class Environment {
   public AWS_S3_ACL = process.env.AWS_S3_ACL ?? "private";
 
   /**
+   * Which file storage system to use
+   */
+  @IsIn(["local", "s3"])
+  public FILE_STORAGE = this.toOptionalString(process.env.FILE_STORAGE) ?? "s3";
+
+  /**
+   * Set default root dir path for local file storage
+   */
+  public FILE_STORAGE_LOCAL_ROOT_DIR =
+    this.toOptionalString(process.env.FILE_STORAGE_LOCAL_ROOT_DIR) ??
+    "/var/lib/outline/data";
+
+  /**
+   * Set max allowed upload size for file attachments.
+   */
+  @IsNumber()
+  public FILE_STORAGE_UPLOAD_MAX_SIZE =
+    this.toOptionalNumber(process.env.FILE_STORAGE_UPLOAD_MAX_SIZE) ??
+    this.toOptionalNumber(process.env.AWS_S3_UPLOAD_MAX_SIZE) ??
+    100000000;
+
+  /**
    * Because imports can be much larger than regular file attachments and are
    * deleted automatically we allow an optional separate limit on the size of
    * imports.
@@ -620,7 +661,7 @@ export class Environment {
   @IsNumber()
   public MAXIMUM_IMPORT_SIZE = Math.max(
     this.toOptionalNumber(process.env.MAXIMUM_IMPORT_SIZE) ?? 100000000,
-    this.AWS_S3_UPLOAD_MAX_SIZE
+    this.FILE_STORAGE_UPLOAD_MAX_SIZE
   );
 
   /**
@@ -637,6 +678,7 @@ export class Environment {
   @IsOptional()
   @IsUrl({
     require_tld: false,
+    require_protocol: true,
     allow_underscores: true,
     protocols: ["http", "https"],
   })
@@ -648,6 +690,14 @@ export class Environment {
   @IsOptional()
   @CannotUseWithout("IFRAMELY_URL")
   public IFRAMELY_API_KEY = this.toOptionalString(process.env.IFRAMELY_API_KEY);
+
+  /**
+   * Enable unsafe-inline in script-src CSP directive
+   */
+  @IsBoolean()
+  public DEVELOPMENT_UNSAFE_INLINE_CSP = this.toBoolean(
+    process.env.DEVELOPMENT_UNSAFE_INLINE_CSP ?? "false"
+  );
 
   /**
    * The product name
@@ -664,6 +714,27 @@ export class Environment {
       "https://app.outline.dev",
       "https://app.outline.dev:3000",
     ].includes(this.URL);
+  }
+
+  /**
+   * Returns true if the current installation is running in production.
+   */
+  public get isProduction() {
+    return this.ENVIRONMENT === "production";
+  }
+
+  /**
+   * Returns true if the current installation is running in the development environment.
+   */
+  public get isDevelopment() {
+    return this.ENVIRONMENT === "development";
+  }
+
+  /**
+   * Returns true if the current installation is running in a test environment.
+   */
+  public get isTest() {
+    return this.ENVIRONMENT === "test";
   }
 
   private toOptionalString(value: string | undefined) {
@@ -687,7 +758,13 @@ export class Environment {
    * @returns A boolean
    */
   private toBoolean(value: string) {
-    return value ? !!JSON.parse(value) : false;
+    try {
+      return value ? !!JSON.parse(value) : false;
+    } catch (err) {
+      throw new Error(
+        `"${value}" could not be parsed as a boolean, must be "true" or "false"`
+      );
+    }
   }
 }
 

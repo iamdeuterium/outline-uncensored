@@ -81,7 +81,6 @@ declare module "styled-components" {
     accent: string;
     yellow: string;
     warmGrey: string;
-    searchHighlight: string;
     danger: string;
     warning: string;
     success: string;
@@ -135,6 +134,7 @@ declare module "styled-components" {
     textDiffDeleted: string;
     textDiffDeletedBackground: string;
     placeholder: string;
+    commentMarkBackground: string;
     commentBackground: string;
     sidebarBackground: string;
     sidebarActiveBackground: string;

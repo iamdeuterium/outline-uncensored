@@ -1,4 +1,5 @@
 import * as React from "react";
+import { mergeRefs } from "react-merge-refs";
 import { VisuallyHidden } from "reakit/VisuallyHidden";
 import styled from "styled-components";
 import breakpoint from "styled-components-breakpoint";
@@ -110,9 +111,8 @@ export const LabelText = styled.div`
   display: inline-block;
 `;
 
-export type Props = React.InputHTMLAttributes<
-  HTMLInputElement | HTMLTextAreaElement
-> & {
+export interface Props
+  extends React.InputHTMLAttributes<HTMLInputElement | HTMLTextAreaElement> {
   type?: "text" | "email" | "checkbox" | "search" | "textarea";
   labelHidden?: boolean;
   label?: string;
@@ -121,18 +121,21 @@ export type Props = React.InputHTMLAttributes<
   margin?: string | number;
   error?: string;
   icon?: React.ReactNode;
-  /* Callback is triggered with the CMD+Enter keyboard combo */
+  /** Like autoFocus, but also select any text in the input */
+  autoSelect?: boolean;
+  /** Callback is triggered with the CMD+Enter keyboard combo */
   onRequestSubmit?: (
     ev: React.KeyboardEvent<HTMLInputElement | HTMLTextAreaElement>
   ) => unknown;
   onFocus?: (ev: React.SyntheticEvent) => unknown;
   onBlur?: (ev: React.SyntheticEvent) => unknown;
-};
+}
 
 function Input(
   props: Props,
   ref: React.RefObject<HTMLInputElement | HTMLTextAreaElement>
 ) {
+  const internalRef = React.useRef<HTMLInputElement | HTMLTextAreaElement>();
   const [focused, setFocused] = React.useState(false);
 
   const handleBlur = (ev: React.SyntheticEvent) => {
@@ -164,6 +167,12 @@ function Input(
       props.onKeyDown(ev);
     }
   };
+
+  React.useEffect(() => {
+    if (props.autoSelect && internalRef.current) {
+      internalRef.current.select();
+    }
+  }, [props.autoSelect, internalRef]);
 
   const {
     type = "text",
@@ -197,7 +206,10 @@ function Input(
           {icon && <IconWrapper>{icon}</IconWrapper>}
           {type === "textarea" ? (
             <RealTextarea
-              ref={ref as React.RefObject<HTMLTextAreaElement>}
+              ref={mergeRefs([
+                internalRef,
+                ref as React.RefObject<HTMLTextAreaElement>,
+              ])}
               onBlur={handleBlur}
               onFocus={handleFocus}
               onKeyDown={handleKeyDown}
@@ -206,7 +218,10 @@ function Input(
             />
           ) : (
             <RealInput
-              ref={ref as React.RefObject<HTMLInputElement>}
+              ref={mergeRefs([
+                internalRef,
+                ref as React.RefObject<HTMLInputElement>,
+              ])}
               onBlur={handleBlur}
               onFocus={handleFocus}
               onKeyDown={handleKeyDown}

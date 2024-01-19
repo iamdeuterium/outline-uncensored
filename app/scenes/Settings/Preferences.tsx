@@ -2,6 +2,7 @@ import { observer } from "mobx-react";
 import { SettingsIcon } from "outline-icons";
 import * as React from "react";
 import { Trans, useTranslation } from "react-i18next";
+import { toast } from "sonner";
 import { languageOptions } from "@shared/i18n";
 import { TeamPreference, UserPreference } from "@shared/types";
 import Button from "~/components/Button";
@@ -13,36 +14,29 @@ import Text from "~/components/Text";
 import useCurrentTeam from "~/hooks/useCurrentTeam";
 import useCurrentUser from "~/hooks/useCurrentUser";
 import useStores from "~/hooks/useStores";
-import useToasts from "~/hooks/useToasts";
 import UserDelete from "../UserDelete";
 import SettingRow from "./components/SettingRow";
 
 function Preferences() {
   const { t } = useTranslation();
-  const { showToast } = useToasts();
-  const { dialogs, auth } = useStores();
+  const { dialogs } = useStores();
   const user = useCurrentUser();
   const team = useCurrentTeam();
 
   const handlePreferenceChange =
     (inverted = false) =>
     async (ev: React.ChangeEvent<HTMLInputElement>) => {
-      const preferences = {
-        ...user.preferences,
-        [ev.target.name]: inverted ? !ev.target.checked : ev.target.checked,
-      };
-
-      await auth.updateUser({ preferences });
-      showToast(t("Preferences saved"), {
-        type: "success",
-      });
+      user.setPreference(
+        ev.target.name as UserPreference,
+        inverted ? !ev.target.checked : ev.target.checked
+      );
+      await user.save();
+      toast.success(t("Preferences saved"));
     };
 
   const handleLanguageChange = async (language: string) => {
-    await auth.updateUser({ language });
-    showToast(t("Preferences saved"), {
-      type: "success",
-    });
+    await user.save({ language });
+    toast.success(t("Preferences saved"));
   };
 
   const showDeleteAccount = () => {
