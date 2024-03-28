@@ -45,7 +45,7 @@ export default class Collection extends ParanoidModel {
 
   @Field
   @observable
-  permission: CollectionPermission | void;
+  permission?: CollectionPermission;
 
   @Field
   @observable
@@ -65,6 +65,9 @@ export default class Collection extends ParanoidModel {
   @observable
   documents?: NavigationNode[];
 
+  /**
+   * @deprecated Use path instead.
+   */
   @observable
   url: string;
 
@@ -137,6 +140,11 @@ export default class Collection extends ParanoidModel {
   @computed
   get initial() {
     return (this.name ? this.name[0] : "?").toUpperCase();
+  }
+
+  @computed
+  get path() {
+    return this.url;
   }
 
   fetchDocuments = async (options?: { force: boolean }) => {

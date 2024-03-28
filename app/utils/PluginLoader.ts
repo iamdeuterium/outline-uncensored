@@ -5,7 +5,7 @@ interface Plugin {
   config: {
     name: string;
     description: string;
-    requiredEnvVars?: string[];
+    adminOnly?: boolean;
     deployments?: string[];
   };
   settings: React.FC;

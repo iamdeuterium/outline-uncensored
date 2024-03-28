@@ -12,7 +12,7 @@ import Button from "~/components/Button";
 import CopyToClipboard from "~/components/CopyToClipboard";
 import Flex from "~/components/Flex";
 import Input from "~/components/Input";
-import InputSelectRole from "~/components/InputSelectRole";
+import InputSelect from "~/components/InputSelect";
 import NudeButton from "~/components/NudeButton";
 import { ResizingHeightContainer } from "~/components/ResizingHeightContainer";
 import Text from "~/components/Text";
@@ -137,11 +137,11 @@ function Invite({ onSubmit }: Props) {
   );
 
   const collectionCount = collections.nonPrivate.length;
-  const collectionAccessNote = (
+  const collectionAccessNote = collectionCount ? (
     <span>
       <Trans>Invited members will receive access to</Trans>{" "}
       <Tooltip
-        tooltip={
+        content={
           <>
             {collections.nonPrivate.map((collection) => (
               <li key={collection.id}>{collection.name}</li>
@@ -155,12 +155,34 @@ function Invite({ onSubmit }: Props) {
       </Tooltip>
       .
     </span>
-  );
+  ) : undefined;
+
+  const options = React.useMemo(() => {
+    const options = [
+      {
+        label: t("Editor"),
+        value: "member",
+      },
+      {
+        label: t("Viewer"),
+        value: "viewer",
+      },
+    ];
+
+    if (user.isAdmin) {
+      options.push({
+        label: t("Admin"),
+        value: "admin",
+      });
+    }
+
+    return options;
+  }, [t, user]);
 
   return (
     <form onSubmit={handleSubmit}>
       {team.guestSignin ? (
-        <Text type="secondary">
+        <Text as="p" type="secondary">
           <Trans
             defaults="Invite members or guests to join your workspace. They can sign in with {{signinMethods}} or use their email address."
             values={{
@@ -170,7 +192,7 @@ function Invite({ onSubmit }: Props) {
           {collectionAccessNote}
         </Text>
       ) : (
-        <Text type="secondary">
+        <Text as="p" type="secondary">
           <Trans
             defaults="Invite members to join your workspace. They will need to sign in with {{signinMethods}}."
             values={{
@@ -236,7 +258,10 @@ function Invite({ onSubmit }: Props) {
               required={!!invite.email}
               flex
             />
-            <InputSelectRole
+            <InputSelect
+              label={t("Role")}
+              ariaLabel={t("Role")}
+              options={options}
               onChange={(role: UserRole) => handleRoleChange(role, index)}
               value={invite.role}
               labelHidden={index !== 0}
@@ -244,7 +269,7 @@ function Invite({ onSubmit }: Props) {
             />
             {index !== 0 && (
               <Remove>
-                <Tooltip tooltip={t("Remove invite")} placement="top">
+                <Tooltip content={t("Remove invite")} placement="top">
                   <NudeButton onClick={(ev) => handleRemove(ev, index)}>
                     <CloseIcon />
                   </NudeButton>

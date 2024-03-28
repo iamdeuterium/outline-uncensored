@@ -13,11 +13,13 @@ import { authorize } from "@server/policies";
 import { presentDocument, presentMention } from "@server/presenters/unfurls";
 import presentUnfurl from "@server/presenters/unfurls/unfurl";
 import { APIContext } from "@server/types";
+import { CacheHelper } from "@server/utils/CacheHelper";
+import { Hook, PluginManager } from "@server/utils/PluginManager";
 import { RateLimiterStrategy } from "@server/utils/RateLimiter";
-import resolvers from "@server/utils/unfurl";
 import * as T from "./schema";
 
 const router = new Router();
+const plugins = PluginManager.getHooks(Hook.UnfurlProvider);
 
 router.post(
   "urls.unfurl",
@@ -74,11 +76,27 @@ router.post(
     }
 
     // External resources
-    if (resolvers.Iframely) {
-      const data = await resolvers.Iframely.unfurl(url);
-      return data.error
-        ? (ctx.response.status = 204)
-        : (ctx.body = presentUnfurl(data));
+    const cachedData = await CacheHelper.getData(
+      CacheHelper.getUnfurlKey(actor.teamId, url)
+    );
+    if (cachedData) {
+      return (ctx.body = presentUnfurl(cachedData));
+    }
+
+    for (const plugin of plugins) {
+      const data = await plugin.value.unfurl(url, actor);
+      if (data) {
+        if ("error" in data) {
+          return (ctx.response.status = 204);
+        } else {
+          await CacheHelper.setData(
+            CacheHelper.getUnfurlKey(actor.teamId, url),
+            data,
+            plugin.value.cacheExpiry
+          );
+          return (ctx.body = presentUnfurl(data));
+        }
+      }
     }
 
     return (ctx.response.status = 204);

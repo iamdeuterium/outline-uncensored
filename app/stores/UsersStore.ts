@@ -1,4 +1,7 @@
+import commandScore from "command-score";
 import invariant from "invariant";
+import deburr from "lodash/deburr";
+import differenceWith from "lodash/differenceWith";
 import filter from "lodash/filter";
 import orderBy from "lodash/orderBy";
 import { observable, computed, action, runInAction } from "mobx";
@@ -7,6 +10,15 @@ import User from "~/models/User";
 import { client } from "~/utils/ApiClient";
 import RootStore from "./RootStore";
 import Store, { RPCAction } from "./base/Store";
+
+type UserCounts = {
+  active: number;
+  admins: number;
+  all: number;
+  invited: number;
+  suspended: number;
+  viewers: number;
+};
 
 export default class UsersStore extends Store<User> {
   actions = [
@@ -19,14 +31,7 @@ export default class UsersStore extends Store<User> {
   ];
 
   @observable
-  counts: {
-    active: number;
-    admins: number;
-    all: number;
-    invited: number;
-    suspended: number;
-    viewers: number;
-  } = {
+  counts: UserCounts = {
     active: 0,
     admins: 0,
     all: 0,
@@ -85,7 +90,11 @@ export default class UsersStore extends Store<User> {
 
   @computed
   get orderedData(): User[] {
-    return orderBy(Array.from(this.data.values()), "name", "asc");
+    return orderBy(
+      Array.from(this.data.values()),
+      (user) => user.name.toLocaleLowerCase(),
+      "asc"
+    );
   }
 
   @action
@@ -159,8 +168,12 @@ export default class UsersStore extends Store<User> {
     });
 
   @action
-  fetchCounts = async (teamId: string): Promise<any> => {
-    const res = await client.post(`/users.count`, {
+  fetchCounts = async (
+    teamId: string
+  ): Promise<{
+    counts: UserCounts;
+  }> => {
+    const res = await client.post(`/≈`, {
       teamId,
     });
     invariant(res?.data, "Data should be available");
@@ -243,6 +256,18 @@ export default class UsersStore extends Store<User> {
     }
   };
 
+  notInDocument = (documentId: string, query = "") => {
+    const document = this.rootStore.documents.get(documentId);
+    const teamMembers = this.activeOrInvited;
+    const documentMembers = document?.members ?? [];
+    const users = differenceWith(
+      teamMembers,
+      documentMembers,
+      (teamMember, documentMember) => teamMember.id === documentMember.id
+    );
+    return queriedUsers(users, query);
+  };
+
   notInCollection = (collectionId: string, query = "") => {
     const memberships = filter(
       this.rootStore.memberships.orderedData,
@@ -253,9 +278,6 @@ export default class UsersStore extends Store<User> {
       this.activeOrInvited,
       (user) => !userIds.includes(user.id)
     );
-    if (!query) {
-      return users;
-    }
     return queriedUsers(users, query);
   };
 
@@ -268,9 +290,6 @@ export default class UsersStore extends Store<User> {
     const users = filter(this.activeOrInvited, (user) =>
       userIds.includes(user.id)
     );
-    if (!query) {
-      return users;
-    }
     return queriedUsers(users, query);
   };
 
@@ -284,9 +303,6 @@ export default class UsersStore extends Store<User> {
       this.activeOrInvited,
       (user) => !userIds.includes(user.id)
     );
-    if (!query) {
-      return users;
-    }
     return queriedUsers(users, query);
   };
 
@@ -299,9 +315,6 @@ export default class UsersStore extends Store<User> {
     const users = filter(this.activeOrInvited, (user) =>
       userIds.includes(user.id)
     );
-    if (!query) {
-      return users;
-    }
     return queriedUsers(users, query);
   };
 
@@ -318,8 +331,21 @@ export default class UsersStore extends Store<User> {
   };
 }
 
-function queriedUsers(users: User[], query: string) {
-  return filter(users, (user) =>
-    user.name.toLowerCase().includes(query.toLowerCase())
-  );
+function queriedUsers(users: User[], query?: string) {
+  const normalizedQuery = deburr((query || "").toLocaleLowerCase());
+
+  return normalizedQuery
+    ? filter(
+        users,
+        (user) =>
+          deburr(user.name.toLocaleLowerCase()).includes(normalizedQuery) ||
+          user.email?.includes(normalizedQuery)
+      )
+        .map((user) => ({
+          user,
+          score: commandScore(user.name, normalizedQuery),
+        }))
+        .sort((a, b) => b.score - a.score)
+        .map(({ user }) => user)
+    : users;
 }

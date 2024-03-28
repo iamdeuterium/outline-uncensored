@@ -6,6 +6,12 @@ export enum UserRole {
 
 export type DateFilter = "day" | "week" | "month" | "year";
 
+export enum StatusFilter {
+  Published = "published",
+  Archived = "archived",
+  Draft = "draft",
+}
+
 export enum Client {
   Web = "web",
   Desktop = "desktop",
@@ -43,41 +49,31 @@ export enum MentionType {
 }
 
 export type PublicEnv = {
-  URL: string;
-  CDN_URL: string;
-  COLLABORATION_URL: string;
-  AWS_S3_UPLOAD_BUCKET_URL: string;
-  AWS_S3_ACCELERATE_URL: string;
-  ENVIRONMENT: string;
-  SENTRY_DSN: string | undefined;
-  SENTRY_TUNNEL: string | undefined;
-  SLACK_CLIENT_ID: string | undefined;
-  SLACK_APP_ID: string | undefined;
-  MAXIMUM_IMPORT_SIZE: number;
-  EMAIL_ENABLED: boolean;
-  PDF_EXPORT_ENABLED: boolean;
-  DEFAULT_LANGUAGE: string;
-  GOOGLE_ANALYTICS_ID: string | undefined;
-  RELEASE: string | undefined;
-  APP_NAME: string;
   ROOT_SHARE_ID?: string;
   analytics: {
-    service?: IntegrationService | UserCreatableIntegrationService;
+    service?: IntegrationService;
     settings?: IntegrationSettings<IntegrationType.Analytics>;
   };
 };
 
 export enum AttachmentPreset {
   DocumentAttachment = "documentAttachment",
+  WorkspaceImport = "workspaceImport",
   Import = "import",
   Avatar = "avatar",
 }
 
 export enum IntegrationType {
+  /** An integration that posts updates to an external system. */
   Post = "post",
+  /** An integration that listens for commands from an external system. */
   Command = "command",
+  /** An integration that embeds content from an external system. */
   Embed = "embed",
+  /** An integration that captures analytics data. */
   Analytics = "analytics",
+  /** An integration that maps an Outline user to an external service. */
+  LinkedAccount = "linkedAccount",
 }
 
 export enum IntegrationService {
@@ -85,13 +81,21 @@ export enum IntegrationService {
   Grist = "grist",
   Slack = "slack",
   GoogleAnalytics = "google-analytics",
+  GitHub = "github",
 }
 
-export enum UserCreatableIntegrationService {
-  Diagrams = "diagrams",
-  Grist = "grist",
-  GoogleAnalytics = "google-analytics",
-}
+export type UserCreatableIntegrationService = Extract<
+  IntegrationService,
+  | IntegrationService.Diagrams
+  | IntegrationService.Grist
+  | IntegrationService.GoogleAnalytics
+>;
+
+export const UserCreatableIntegrationService = {
+  Diagrams: IntegrationService.Diagrams,
+  Grist: IntegrationService.Grist,
+  GoogleAnalytics: IntegrationService.GoogleAnalytics,
+} as const;
 
 export enum CollectionPermission {
   Read = "read",
@@ -99,8 +103,21 @@ export enum CollectionPermission {
   Admin = "admin",
 }
 
+export enum DocumentPermission {
+  Read = "read",
+  ReadWrite = "read_write",
+}
+
 export type IntegrationSettings<T> = T extends IntegrationType.Embed
-  ? { url: string }
+  ? {
+      url: string;
+      github?: {
+        installation: {
+          id: number;
+          account: { id: number; name: string; avatarUrl: string };
+        };
+      };
+    }
   : T extends IntegrationType.Analytics
   ? { measurementId: string }
   : T extends IntegrationType.Post
@@ -109,9 +126,18 @@ export type IntegrationSettings<T> = T extends IntegrationType.Embed
   ? { serviceTeamId: string }
   :
       | { url: string }
+      | {
+          github?: {
+            installation: {
+              id: number;
+              account: { id?: number; name: string; avatarUrl?: string };
+            };
+          };
+        }
       | { url: string; channel: string; channelId: string }
       | { serviceTeamId: string }
       | { measurementId: string }
+      | { slack: { serviceTeamId: string; serviceUserId: string } }
       | undefined;
 
 export enum UserPreference {
@@ -134,6 +160,8 @@ export type SourceMetadata = {
   fileName?: string;
   /** The original source mime type. */
   mimeType?: string;
+  /** The creator of the original external source. */
+  createdByName?: string;
   /** An ID in the external source. */
   externalId?: string;
   /** Whether the item was created through a trial license. */
@@ -158,6 +186,8 @@ export enum TeamPreference {
   PublicBranding = "publicBranding",
   /** Whether viewers should see download options. */
   ViewersCanExport = "viewersCanExport",
+  /** Whether members can invite new users. */
+  MembersCanInvite = "membersCanInvite",
   /** Whether users can comment on documents. */
   Commenting = "commenting",
   /** The custom theme for the team. */
@@ -168,6 +198,7 @@ export type TeamPreferences = {
   [TeamPreference.SeamlessEdit]?: boolean;
   [TeamPreference.PublicBranding]?: boolean;
   [TeamPreference.ViewersCanExport]?: boolean;
+  [TeamPreference.MembersCanInvite]?: boolean;
   [TeamPreference.Commenting]?: boolean;
   [TeamPreference.CustomTheme]?: Partial<CustomTheme>;
 };
@@ -198,6 +229,8 @@ export type CollectionSort = {
 export enum NotificationEventType {
   PublishDocument = "documents.publish",
   UpdateDocument = "documents.update",
+  AddUserToDocument = "documents.add_user",
+  AddUserToCollection = "collections.add_user",
   CreateRevision = "revisions.create",
   CreateCollection = "collections.create",
   CreateComment = "comments.create",
@@ -216,9 +249,9 @@ export enum NotificationChannelType {
 }
 
 export type NotificationSettings = {
-  [key in NotificationEventType]?:
+  [event in NotificationEventType]?:
     | {
-        [key in NotificationChannelType]?: boolean;
+        [type in NotificationChannelType]?: boolean;
       }
     | boolean;
 };
@@ -234,11 +267,15 @@ export const NotificationEventDefaults = {
   [NotificationEventType.Onboarding]: true,
   [NotificationEventType.Features]: true,
   [NotificationEventType.ExportCompleted]: true,
+  [NotificationEventType.AddUserToDocument]: true,
+  [NotificationEventType.AddUserToCollection]: true,
 };
 
 export enum UnfurlType {
   Mention = "mention",
   Document = "document",
+  Issue = "issue",
+  Pull = "pull",
 }
 
 export enum QueryNotices {
@@ -247,14 +284,31 @@ export enum QueryNotices {
 
 export type OEmbedType = "photo" | "video" | "rich";
 
-export type Unfurl<T = OEmbedType> = {
+export type UnfurlResponse<S = OEmbedType, T = Record<string, any>> = {
   url?: string;
-  type: T;
+  type: S | ("issue" | "pull" | "commit");
   title: string;
   description?: string;
+  createdAt?: string;
   thumbnailUrl?: string | null;
-  meta?: Record<string, string>;
+  author?: { name: string; avatarUrl: string };
+  meta?: T;
 };
+
+export type Unfurl =
+  | UnfurlResponse
+  | {
+      error: string;
+    };
+
+export type UnfurlSignature = (
+  url: string,
+  actor?: any
+) => Promise<Unfurl | void>;
+
+export type UninstallSignature = (
+  integration: Record<string, any>
+) => Promise<void>;
 
 export type JSONValue =
   | string

@@ -27,7 +27,7 @@ const defaultColors: Colors = {
   accent: "#0366d6",
   yellow: "#EDBA07",
   warmGrey: "#EDF2F7",
-  danger: "#f4345d",
+  danger: "#ed2651",
   warning: "#f08a24",
   success: "#2f3336",
   info: "#a0d3e8",
@@ -130,7 +130,7 @@ export const buildLightTheme = (input: Partial<Colors>): DefaultTheme => {
 
     commentBackground: colors.warmGrey,
 
-    modalBackdrop: colors.black10,
+    modalBackdrop: "rgba(0, 0, 0, 0.15)",
     modalBackground: colors.white,
     modalShadow:
       "0 4px 8px rgb(0 0 0 / 8%), 0 2px 4px rgb(0 0 0 / 0%), 0 30px 40px rgb(0 0 0 / 8%)",
@@ -219,7 +219,7 @@ export const buildDarkTheme = (input: Partial<Colors>): DefaultTheme => {
     toastText: colors.almostWhite,
     quote: colors.almostWhite,
     code: colors.almostWhite,
-    codeBackground: colors.black75,
+    codeBackground: "#1d202a",
     codeBorder: colors.white10,
     codeTag: "#b5cea8",
     codeString: "#ce9178",

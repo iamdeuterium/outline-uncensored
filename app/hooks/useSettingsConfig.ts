@@ -5,7 +5,7 @@ import {
   CodeIcon,
   UserIcon,
   GroupIcon,
-  LinkIcon,
+  GlobeIcon,
   TeamIcon,
   BeakerIcon,
   BuildingBlocksIcon,
@@ -148,7 +148,7 @@ const useSettingsConfig = () => {
         component: Shares,
         enabled: true,
         group: t("Workspace"),
-        icon: LinkIcon,
+        icon: GlobeIcon,
       },
       {
         name: t("Import"),
@@ -197,7 +197,7 @@ const useSettingsConfig = () => {
     Object.values(PluginLoader.plugins).map((plugin) => {
       const hasSettings = !!plugin.settings;
       const enabledInDeployment =
-        !plugin.config.deployments ||
+        !plugin.config?.deployments ||
         plugin.config.deployments.length === 0 ||
         (plugin.config.deployments.includes("cloud") && isCloudHosted) ||
         (plugin.config.deployments.includes("enterprise") && !isCloudHosted);
@@ -208,7 +208,10 @@ const useSettingsConfig = () => {
         // TODO: Remove hardcoding of plugin id here
         group: plugin.id === "collections" ? t("Workspace") : t("Integrations"),
         component: plugin.settings,
-        enabled: enabledInDeployment && hasSettings && can.update,
+        enabled:
+          enabledInDeployment &&
+          hasSettings &&
+          (plugin.config.adminOnly === false || can.update),
         icon: plugin.icon,
       } as ConfigItem;
 

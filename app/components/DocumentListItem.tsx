@@ -97,7 +97,7 @@ function DocumentListItem(
             highlight={highlight}
             dir={document.dir}
           />
-          {document.isBadgedNew && document.createdBy.id !== user.id && (
+          {document.isBadgedNew && document.createdBy?.id !== user.id && (
             <Badge yellow>{t("New")}</Badge>
           )}
           {canStar && (
@@ -107,7 +107,7 @@ function DocumentListItem(
           )}
           {document.isDraft && showDraft && (
             <Tooltip
-              tooltip={t("Only visible to you")}
+              content={t("Only visible to you")}
               delay={500}
               placement="top"
             >

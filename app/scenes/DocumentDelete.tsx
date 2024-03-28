@@ -51,7 +51,7 @@ function DocumentDelete({ document, onSubmit }: Props) {
           }
 
           // otherwise, redirect to the collection home
-          history.push(collectionPath(collection?.url || "/"));
+          history.push(collectionPath(collection?.path || "/"));
         }
 
         onSubmit();
@@ -83,7 +83,7 @@ function DocumentDelete({ document, onSubmit }: Props) {
 
   return (
     <form onSubmit={handleSubmit}>
-      <Text type="secondary">
+      <Text as="p" type="secondary">
         {document.isTemplate ? (
           <Trans
             defaults="Are you sure you want to delete the <em>{{ documentTitle }}</em> template?"
@@ -119,7 +119,7 @@ function DocumentDelete({ document, onSubmit }: Props) {
         )}
       </Text>
       {canArchive && (
-        <Text type="secondary">
+        <Text as="p" type="secondary">
           <Trans>
             If you’d like the option of referencing or restoring the{" "}
             {{
