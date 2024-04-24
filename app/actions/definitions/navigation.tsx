@@ -87,8 +87,7 @@ export const navigateToSettings = createAction({
   section: NavigationSection,
   shortcut: ["g", "s"],
   icon: <SettingsIcon />,
-  visible: ({ stores }) =>
-    stores.policies.abilities(stores.auth.team?.id || "").update,
+  visible: () => stores.policies.abilities(stores.auth.team?.id || "").update,
   perform: () => history.push(settingsPath()),
 });
 
@@ -128,6 +127,15 @@ export const navigateToAccountPreferences = createAction({
   perform: () => history.push(settingsPath("preferences")),
 });
 
+export const openDocumentation = createAction({
+  name: ({ t }) => t("Documentation"),
+  analyticsName: "Open documentation",
+  section: NavigationSection,
+  iconInContextMenu: false,
+  icon: <OpenIcon />,
+  perform: () => window.open(UrlHelper.guide),
+});
+
 export const openAPIDocumentation = createAction({
   name: ({ t }) => t("API documentation"),
   analyticsName: "Open API documentation",
@@ -142,7 +150,7 @@ export const toggleSidebar = createAction({
   analyticsName: "Toggle sidebar",
   keywords: "hide show navigation",
   section: NavigationSection,
-  perform: ({ stores }) => stores.ui.toggleCollapsedSidebar(),
+  perform: () => stores.ui.toggleCollapsedSidebar(),
 });
 
 export const openFeedbackUrl = createAction({
@@ -205,8 +213,8 @@ export const logout = createAction({
   analyticsName: "Log out",
   section: NavigationSection,
   icon: <LogoutIcon />,
-  perform: () => {
-    void stores.auth.logout();
+  perform: async () => {
+    await stores.auth.logout();
     if (env.OIDC_LOGOUT_URI) {
       window.location.replace(env.OIDC_LOGOUT_URI);
     }
@@ -219,6 +227,7 @@ export const rootNavigationActions = [
   navigateToArchive,
   navigateToTrash,
   downloadApp,
+  openDocumentation,
   openAPIDocumentation,
   openFeedbackUrl,
   openBugReportUrl,

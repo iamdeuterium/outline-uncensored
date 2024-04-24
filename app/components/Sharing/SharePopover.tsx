@@ -1,3 +1,4 @@
+import { isEmail } from "class-validator";
 import { AnimatePresence, m } from "framer-motion";
 import { observer } from "mobx-react";
 import { BackIcon, LinkIcon } from "outline-icons";
@@ -7,6 +8,7 @@ import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import styled from "styled-components";
 import { s } from "@shared/styles";
+import { DocumentPermission, UserRole } from "@shared/types";
 import Document from "~/models/Document";
 import Share from "~/models/Share";
 import CopyToClipboard from "~/components/CopyToClipboard";
@@ -149,20 +151,46 @@ function SharePopover({
         name: t("Invite"),
         section: UserSection,
         perform: async () => {
-          await Promise.all(
-            pendingIds.map((userId) =>
-              userMemberships.create({
+          const usersInvited = await Promise.all(
+            pendingIds.map(async (idOrEmail) => {
+              let user;
+
+              // convert email to user
+              if (isEmail(idOrEmail)) {
+                const response = await users.invite([
+                  {
+                    email: idOrEmail,
+                    name: idOrEmail,
+                    role: team.defaultUserRole,
+                  },
+                ]);
+                user = response.users[0];
+              } else {
+                user = users.get(idOrEmail);
+              }
+
+              if (!user) {
+                return;
+              }
+
+              await userMemberships.create({
                 documentId: document.id,
-                userId,
-              })
-            )
+                userId: user.id,
+                permission:
+                  user?.role === UserRole.Viewer ||
+                  user?.role === UserRole.Guest
+                    ? DocumentPermission.Read
+                    : DocumentPermission.ReadWrite,
+              });
+
+              return user;
+            })
           );
 
-          if (pendingIds.length === 1) {
-            const user = users.get(pendingIds[0]);
+          if (usersInvited.length === 1) {
             toast.message(
               t("{{ userName }} was invited to the document", {
-                userName: user!.name,
+                userName: usersInvited[0].name,
               })
             );
           } else {
@@ -178,7 +206,15 @@ function SharePopover({
           hidePicker();
         },
       }),
-    [document.id, hidePicker, pendingIds, t, users, userMemberships]
+    [
+      t,
+      pendingIds,
+      hidePicker,
+      userMemberships,
+      document.id,
+      users,
+      team.defaultUserRole,
+    ]
   );
 
   const handleQuery = React.useCallback(

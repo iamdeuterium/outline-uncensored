@@ -18,20 +18,12 @@ const UserStatusFilter = ({ activeKey, onSelect, ...rest }: Props) => {
     () =>
       compact([
         {
+          key: "all",
+          label: t("All status"),
+        },
+        {
           key: "",
           label: t("Active"),
-        },
-        {
-          key: "all",
-          label: t("Everyone"),
-        },
-        {
-          key: "members",
-          label: t("Members"),
-        },
-        {
-          key: "admins",
-          label: t("Admins"),
         },
         ...(user.isAdmin
           ? [
@@ -44,10 +36,6 @@ const UserStatusFilter = ({ activeKey, onSelect, ...rest }: Props) => {
         {
           key: "invited",
           label: t("Invited"),
-        },
-        {
-          key: "viewers",
-          label: t("Viewers"),
         },
       ]),
     [t, user.isAdmin]
